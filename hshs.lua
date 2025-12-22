@@ -3,7 +3,7 @@ repeat task.wait() until game:IsLoaded() and game.Players.LocalPlayer
 task.wait(3)
 
 -- ==============================================================================
--- 1. TITAN V3 (LITE): ANTI-BAN HOOK (GIỮ NGUYÊN)
+-- 1. TITAN V3 (LITE): ANTI-BAN HOOK
 -- ==============================================================================
 local function EnableTitanV3()
     if not hookmetamethod then return end
@@ -50,7 +50,7 @@ local Window = Rayfield:CreateWindow({
    Theme = "Default",
    DisableRayfieldPrompts = false,
    DisableBuildWarnings = false,
-   ConfigurationSaving = { Enabled = true, FileName = "OxenHub_Mobile_FixUI" }, -- Đổi tên file config để fix lỗi mất nút
+   ConfigurationSaving = { Enabled = true, FileName = "OxenHub_Mobile_FinalFix" },
    Discord = { Enabled = false, Invite = "", RememberJoins = true },
    KeySystem = false,
 })
@@ -63,7 +63,7 @@ _G.CORE = {
     AimEnabled = false,
     AimReady = false,
     FOV = 130,
-    Deadzone = 17, -- Logic mới (17) nhưng dùng Slider cũ để chỉnh
+    Deadzone = 17,
     WallCheck = true,
     Pred = 0.165,
     AssistStrength = 0.4,
@@ -95,7 +95,7 @@ local fovCircle = Drawing.new("Circle"); fovCircle.Thickness = 1; fovCircle.NumS
 local deadCircle = Drawing.new("Circle"); deadCircle.Thickness = 1.5; deadCircle.NumSides = 20; deadCircle.Filled = false; deadCircle.Color = Color3.fromRGB(255, 0, 0)
 
 -- ==============================================================================
--- 4. LOGIC HOẠT ĐỘNG (GIỮ NGUYÊN BẢN MỚI NHẤT)
+-- 4. LOGIC HOẠT ĐỘNG (CORE ENGINE)
 -- ==============================================================================
 
 -- [HELPERS]
@@ -143,13 +143,13 @@ end
 
 local TargetCache = {} 
 
--- [THREAD: SCANNER]
+-- [THREAD: HYBRID SCANNER (ESP + AIM)]
 task.spawn(function()
     while true do
         local tempAimCache = {}
         local config = _G.CORE
         
-        -- Quét Player
+        -- Quét Player (Cập nhật ESP & Lấy Aim)
         local allPlayers = P:GetPlayers()
         for i = 1, #allPlayers do
             local p = allPlayers[i]
@@ -199,7 +199,7 @@ task.spawn(function()
             end
         end
 
-        -- Quét Bot
+        -- Quét Bot (Chỉ lấy Aim)
         if config.AimEnabled then
             local wsChildren = Workspace:GetChildren()
             for i = 1, #wsChildren do
@@ -211,7 +211,7 @@ task.spawn(function()
             end
         end
 
-        -- Update Cache
+        -- Update Cache (Warm-up Check)
         if config.AimEnabled then
             if not config.AimReady then
                 TargetCache = tempAimCache
@@ -292,48 +292,42 @@ RS.RenderStepped:Connect(function()
 end)
 
 -- ==============================================================================
--- 5. UI MENU STRUCTURE (CẤU TRÚC MENU CŨ + KẾT NỐI LOGIC MỚI)
+-- 5. UI MENU (TABS & BUTTONS)
 -- ==============================================================================
-local MainTab = Window:CreateTab("Combat", nil)
-local MainSection = MainTab:CreateSection("Aim & Visuals")
 
--- CÁC NÚT CŨ NHƯNG ĐIỀU KHIỂN LOGIC MỚI (_G.CORE)
+-- [TAB 1: COMBAT]
+local CombatTab = Window:CreateTab("Combat", nil)
+local AimSection = CombatTab:CreateSection("Aimbot Logic")
 
-MainTab:CreateToggle({
+CombatTab:CreateToggle({
     Name = "Enable Aimbot",
     CurrentValue = false,
     Flag = "Aim",
     Callback = function(v) _G.CORE.AimEnabled = v end,
 })
 
-MainTab:CreateSlider({
+CombatTab:CreateSlider({
     Name = "FOV (Assist Range)",
     Range = {50, 300}, Increment = 5, CurrentValue = 130,
     Callback = function(v) _G.CORE.FOV = v end,
 })
 
-MainTab:CreateSlider({
+CombatTab:CreateSlider({
     Name = "Deadzone (Lock Range)",
     Range = {5, 50}, Increment = 1, CurrentValue = 17,
     Callback = function(v) _G.CORE.Deadzone = v end,
 })
 
-MainTab:CreateToggle({
-    Name = "Enable ESP",
+CombatTab:CreateToggle({
+    Name = "WallCheck (Chắn Tường)",
     CurrentValue = true,
-    Flag = "ESP",
-    Callback = function(v) _G.CORE.EspEnabled = v end,
+    Flag = "WallCheck",
+    Callback = function(v) _G.CORE.WallCheck = v end,
 })
 
-MainTab:CreateToggle({
-    Name = "FFA Mode (All Red)",
-    CurrentValue = false,
-    Flag = "FFAMode",
-    Callback = function(v) _G.CORE.EspFFA = v end,
-})
+local RecoilSection = CombatTab:CreateSection("Gun Mods")
 
--- No Recoil (Giữ nguyên logic cũ vì nó độc lập)
-MainTab:CreateToggle({
+CombatTab:CreateToggle({
     Name = "No Recoil (Mobile Fix)",
     CurrentValue = false,
     Flag = "Recoil",
@@ -362,10 +356,41 @@ MainTab:CreateToggle({
     end,
 })
 
--- SECTION MOVEMENT (GIỮ NGUYÊN)
-local MoveSection = MainTab:CreateSection("Movement")
+-- [TAB 2: VISUALS]
+local VisualsTab = Window:CreateTab("Visuals", nil)
+local EspSection = VisualsTab:CreateSection("ESP Settings")
 
-MainTab:CreateSlider({
+VisualsTab:CreateToggle({
+    Name = "Enable ESP",
+    CurrentValue = true,
+    Flag = "ESP",
+    Callback = function(v) _G.CORE.EspEnabled = v end,
+})
+
+VisualsTab:CreateToggle({
+    Name = "Hiện Box (Hộp)",
+    CurrentValue = true,
+    Callback = function(v) _G.CORE.EspBox = v end,
+})
+
+VisualsTab:CreateToggle({
+    Name = "Hiện Tên & Mét",
+    CurrentValue = true,
+    Callback = function(v) _G.CORE.EspName = v end,
+})
+
+VisualsTab:CreateToggle({
+    Name = "FFA Mode (All Red)",
+    CurrentValue = false,
+    Flag = "FFAMode",
+    Callback = function(v) _G.CORE.EspFFA = v end,
+})
+
+-- [TAB 3: MOVEMENT]
+local MoveTab = Window:CreateTab("Movement", nil)
+local MoveSection = MoveTab:CreateSection("Character")
+
+MoveTab:CreateSlider({
    Name = "Walkspeed",
    Range = {16, 100}, Increment = 1, CurrentValue = 25,
    Callback = function(v) 
@@ -380,7 +405,7 @@ MainTab:CreateSlider({
    end,
 })
 
-MainTab:CreateToggle({
+MoveTab:CreateToggle({
    Name = "Infinite Jump",
    CurrentValue = false,
    Callback = function(v) 
@@ -395,7 +420,9 @@ MainTab:CreateToggle({
    end,
 })
 
--- SMOOTH FLY (GIỮ NGUYÊN)
+local FlySection = MoveTab:CreateSection("Fly System")
+
+-- SMOOTH FLY
 local FlySettings = {Enabled = false, Speed = 1.5, Smoothness = 0.2, GoingUp = false, GoingDown = false, CurrentVelocity = Vector3.new(0,0,0)}
 local MobileFlyUI = nil
 local function ToggleMobileFlyUI(bool)
@@ -445,7 +472,7 @@ RS.RenderStepped:Connect(function()
     hum.PlatformStand = true 
 end)
 
-MainTab:CreateToggle({
+MoveTab:CreateToggle({
     Name = "Smooth Fly (Side UI + Noclip)",
     CurrentValue = false,
     Flag = "FlyMode",
@@ -475,9 +502,9 @@ MainTab:CreateToggle({
         end
     end,
 })
-MainTab:CreateSlider({Name = "Fly Speed", Range = {0.5, 5}, Increment = 0.1, CurrentValue = 1.5, Callback = function(v) FlySettings.Speed = v end})
+MoveTab:CreateSlider({Name = "Fly Speed", Range = {0.5, 5}, Increment = 0.1, CurrentValue = 1.5, Callback = function(v) FlySettings.Speed = v end})
 
--- GARBAGE COLLECTOR (QUÉT SÓT)
+-- GARBAGE COLLECTOR
 task.spawn(function()
     while true do
         for _, p in ipairs(P:GetPlayers()) do
