@@ -1,15 +1,15 @@
 --[[
     NAME: Oxen Hub - Mobile Final
-    VERSION: V33 (Complete Delta X Edition)
-    OPTIMIZED FOR: Delta X, Hydrogen, Fluxus (Mobile Executors)
+    VERSION: V36 (Custom Colors Edition)
+    OPTIMIZED FOR: Delta X, Hydrogen, Fluxus
     
-    LOG UPDATE:
-    - [x] Anti-Ban V5 (Advanced Hooking & Network Throttle)
+    CHANGELOG V36:
+    - [x] FOV Circle -> Xanh Dương (Blue)
+    - [x] Deadzone Circle -> Xanh Lá (Green)
+    - [x] Full Anti-Ban V5 (Hook Metamethods + Network Throttle)
     - [x] Hybrid Scanner V3 (Player + Bot + ForceField Check)
-    - [x] Visual Engine (Rainbow + Status Colors: Yellow/Green/Rainbow)
-    - [x] Backstab V2 (Smooth Tweening + Velocity Spoof)
-    - [x] Mobile Optimization (Render Throttle, Garbage Collection Safety)
-    - [x] Full Features Restored (Fly, Noclip, InfJump, Walkspeed, NoRecoil)
+    - [x] Drawing Engine V2 (Self-Healing Logic - Never Disappear)
+    - [x] Restored All Features (Fly, Noclip, Walkspeed, InfJump, NoRecoil)
 ]]
 
 -- Chờ game load xong hoàn toàn để tránh crash script
@@ -62,8 +62,6 @@ _G.CORE = {
     
     -- SYSTEM OPTIMIZATION
     ScanRate = 0.1,        -- Tốc độ quét (0.1s = 10 lần/giây -> Tiết kiệm Pin)
-    RainbowHue = 0,        -- Giá trị màu hiện tại
-    RainbowEnabled = true, -- Bật chế độ màu mè
     TargetLocking = false  -- Biến kiểm tra đang khóa mục tiêu hay không
 }
 
@@ -135,58 +133,42 @@ end
 task.spawn(function() pcall(ActivateAntiBan) end)
 
 -- ==============================================================================
--- [SECTION 4] VISUAL ENGINE (DRAWING & RAINBOW LOGIC)
+-- [SECTION 4] VISUAL ENGINE (CUSTOM COLORS & SELF-HEALING)
 -- ==============================================================================
-local fovCircle = SafeDrawing("Circle")
-local deadCircle = SafeDrawing("Circle")
+local fovCircle = nil
+local deadCircle = nil
 
--- Hàm khôi phục vòng tròn nếu bị Game xóa (Garbage Collection Fix)
-local function RestoreDrawingObjects()
-    if not fovCircle then fovCircle = SafeDrawing("Circle") end
-    if not deadCircle then deadCircle = SafeDrawing("Circle") end
-    
-    if fovCircle then
-        fovCircle.Thickness = 1.5
-        fovCircle.NumSides = 40 -- Giảm giác để tối ưu FPS mobile
-        fovCircle.Filled = false
-        fovCircle.Transparency = 1
+-- Hàm kiểm tra và tạo lại vòng tròn nếu bị mất (Self-Healing)
+-- Logic này đảm bảo vòng tròn LUÔN LUÔN tồn tại
+local function CheckDrawingObjects()
+    -- 1. FOV Circle (Màu Xanh Dương - Blue)
+    if not fovCircle then
+        local s, o = pcall(function() return Drawing.new("Circle") end)
+        if s and o then
+            fovCircle = o
+            fovCircle.Visible = false
+            fovCircle.Thickness = 1.5
+            fovCircle.NumSides = 40     -- Giảm giác để tối ưu FPS mobile
+            fovCircle.Filled = false
+            fovCircle.Transparency = 0.8
+            fovCircle.Color = Color3.fromRGB(0, 190, 255) -- XANH DƯƠNG SÁNG
+        end
     end
-    if deadCircle then
-        deadCircle.Thickness = 1.5
-        deadCircle.NumSides = 24
-        deadCircle.Filled = false
-        deadCircle.Transparency = 1
+    
+    -- 2. Deadzone Circle (Màu Xanh Lá - Green)
+    if not deadCircle then
+        local s, o = pcall(function() return Drawing.new("Circle") end)
+        if s and o then
+            deadCircle = o
+            deadCircle.Visible = false
+            deadCircle.Thickness = 1.5
+            deadCircle.NumSides = 24
+            deadCircle.Filled = false
+            deadCircle.Transparency = 0.8
+            deadCircle.Color = Color3.fromRGB(0, 255, 0) -- XANH LÁ
+        end
     end
 end
-RestoreDrawingObjects() -- Gọi lần đầu
-
--- Luồng xử lý màu sắc thông minh (Status Colors)
-task.spawn(function()
-    while true do
-        if _G.CORE.RainbowEnabled then
-            _G.CORE.RainbowHue = (_G.CORE.RainbowHue + 5) % 360
-            local rainbowColor = Color3.fromHSV(_G.CORE.RainbowHue / 360, 1, 1)
-            
-            -- Logic màu trạng thái:
-            -- 1. Nếu đang Warm-up (Chưa sẵn sàng) -> Màu Vàng
-            -- 2. Nếu đang Khóa mục tiêu (Locked) -> Màu Xanh Lá
-            -- 3. Bình thường -> Màu Rainbow
-            
-            local statusColor = rainbowColor
-            if _G.CORE.AimEnabled then
-                if not _G.CORE.AimReady then
-                    statusColor = Color3.fromRGB(255, 255, 0) -- Vàng (Waiting)
-                elseif _G.CORE.TargetLocking then
-                    statusColor = Color3.fromRGB(0, 255, 0)   -- Xanh Lá (Locked)
-                end
-            end
-            
-            if fovCircle then fovCircle.Color = statusColor end
-            if deadCircle then deadCircle.Color = statusColor end
-        end
-        task.wait(0.1) -- Cập nhật 10 lần/giây
-    end
-end)
 
 -- ==============================================================================
 -- [SECTION 5] TARGET SCANNER & ESP SYSTEM (V3 HYBRID)
@@ -248,7 +230,6 @@ local function UpdateESP(root, nameText, isEnemy)
     local isTarget = isEnemy or _G.CORE.EspFFA
     
     -- Màu sắc ESP: Đỏ (Địch) vs Xanh (Đồng đội)
-    -- Không dùng Rainbow cho ESP để tránh rối mắt
     local color = isTarget and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(0, 255, 255)
     
     esp.Frame.UIStroke.Color = color
@@ -346,7 +327,7 @@ RunService.RenderStepped:Connect(function()
     local conf = _G.CORE
     
     -- 1. Drawing Safety Check (Tự động khôi phục nếu mất)
-    if not fovCircle or not deadCircle then RestoreDrawingObjects() end
+    CheckDrawingObjects()
     
     if fovCircle then
         fovCircle.Visible = conf.AimEnabled
@@ -396,7 +377,7 @@ RunService.RenderStepped:Connect(function()
         end
         
         if bestTarget then
-            conf.TargetLocking = true -- Đánh dấu đang khóa -> Đổi màu vòng tròn
+            conf.TargetLocking = true
             
             local velocity = bestTarget.Root.AssemblyLinearVelocity or Vector3.zero
             local predPos = bestTarget.Part.Position + (velocity * conf.Pred)
@@ -420,13 +401,13 @@ end)
 -- ==============================================================================
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 local Window = Rayfield:CreateWindow({
-   Name = "Oxen Hub - K2PN",
+   Name = "Oxen Hub - Mobile Final",
    Icon = 0,
-   LoadingTitle = "Oxen-Hub V33",
+   LoadingTitle = "Oxen-Hub V36",
    LoadingSubtitle = "Delta X Complete",
    Theme = "Default",
    DisableRayfieldPrompts = false,
-   ConfigurationSaving = { Enabled = true, FileName = "OxenHub_V33_Config" },
+   ConfigurationSaving = { Enabled = true, FileName = "OxenHub_V36_Config" },
    KeySystem = false,
 })
 
@@ -436,7 +417,7 @@ CombatTab:CreateSection("Aimbot System")
 
 -- Toggle chính (Đã bỏ Slider FOV/Deadzone như yêu cầu)
 CombatTab:CreateToggle({
-    Name = "Enable Aimbot",
+    Name = "Enable Aimbot (FOV: 110 | Deadzone: 17)",
     CurrentValue = false,
     Flag = "Aim",
     Callback = function(v) _G.CORE.AimEnabled = v end
@@ -571,7 +552,7 @@ end)
 
 MoveTab:CreateSection("Backstab (Áp sát)")
 MoveTab:CreateToggle({
-    Name = "Tween to enemy",
+    Name = "Silent Backstab (Tween)",
     CurrentValue = false,
     Callback = function(v) 
         _G.CORE.BackstabEnabled = v
@@ -579,7 +560,7 @@ MoveTab:CreateToggle({
     end
 })
 MoveTab:CreateSlider({
-    Name = "Tween Speed",
+    Name = "Tween Speed (Tốc độ bay)",
     Range = {20, 200}, Increment = 5, CurrentValue = 50,
     Callback = function(v) _G.CORE.BackstabSpeed = v end
 })
@@ -604,7 +585,7 @@ MoveTab:CreateSlider({
 
 -- Infinite Jump
 MoveTab:CreateToggle({
-   Name = "Infinite Jump",
+   Name = "Infinite Jump (Nhảy vô hạn)",
    CurrentValue = false,
    Callback = function(v) 
        _G.InfJump = v
@@ -744,4 +725,4 @@ task.spawn(function()
     end
 end)
 
-Rayfield:Notify({Title = "Oxen-HUB", Content = "FOLLOW ME TO CREATE", Duration = 4})
+Rayfield:Notify({Title = "Oxen Hub Complete", Content = "V36: Colors Updated!", Duration = 5})
