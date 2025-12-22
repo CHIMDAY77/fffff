@@ -3,69 +3,42 @@ repeat task.wait() until game:IsLoaded() and game.Players.LocalPlayer
 task.wait(3)
 
 -- ==============================================================================
--- 1. TITAN V3 (LITE): ANTI-BAN HOOK
+-- 1. TITAN V3 (LITE): ANTI-BAN HOOK (GIỮ NGUYÊN)
 -- ==============================================================================
 local function EnableTitanV3()
-    if not hookmetamethod then
-        warn("Executor không hỗ trợ Hook!")
-        return
-    end
-
+    if not hookmetamethod then return end
     local Players = game:GetService("Players")
     local LocalPlayer = Players.LocalPlayer
-    
-    local BlacklistedNames = {
-        "Ban", "Kick", "Punish", "Admin", "Detection", "Security", "Report", "Log", "Cheat", "Exploit", "Flag"
-    }
-    
+    local BlacklistedNames = {"Ban", "Kick", "Punish", "Admin", "Detection", "Security", "Report", "Log", "Cheat", "Exploit", "Flag"}
     local oldNamecall
     oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
         local method = getnamecallmethod()
-        
         if not checkcaller() then
-            -- 1. CHẶN KICK/SHUTDOWN
             if method == "Kick" or method == "Shutdown" then
-                if self == LocalPlayer or self == game then
-                    return nil 
-                end
+                if self == LocalPlayer or self == game then return nil end
             end
-            
-            -- 2. CHẶN BREAKJOINTS
-            if method == "BreakJoints" and (self == LocalPlayer.Character) then
-                return nil
-            end
-
-            -- 3. CHẶN GỬI REPORT
+            if method == "BreakJoints" and (self == LocalPlayer.Character) then return nil end
             if method == "FireServer" then
                 local name = self.Name
                 for _, keyword in ipairs(BlacklistedNames) do
-                    if string.find(name, keyword) then
-                        return nil 
-                    end
+                    if string.find(name, keyword) then return nil end
                 end
             end
         end
-
         return oldNamecall(self, ...)
     end)
-    
-    print("🛡️ TITAN V3 (LITE): ANTI-BAN ACTIVE - GAMEPLAY STABLE")
+    print("🛡️ TITAN V3: ACTIVE")
 end
-
-task.spawn(function()
-    pcall(EnableTitanV3)
-end)
+task.spawn(function() pcall(EnableTitanV3) end)
 
 if getgenv().OxenHub_Loaded then
-    game:GetService("StarterGui"):SetCore("SendNotification", {
-        Title = "Oxen Hub", Text = "Script is already running!", Duration = 3
-    })
+    game:GetService("StarterGui"):SetCore("SendNotification", {Title = "Oxen Hub", Text = "Already running!", Duration = 3})
     return
 end
 getgenv().OxenHub_Loaded = true
 
 -- ==============================================================================
--- 2. SETUP UI LIBRARY
+-- 2. SETUP UI LIBRARY (RAYFIELD)
 -- ==============================================================================
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
@@ -77,10 +50,33 @@ local Window = Rayfield:CreateWindow({
    Theme = "Default",
    DisableRayfieldPrompts = false,
    DisableBuildWarnings = false,
-   ConfigurationSaving = { Enabled = true, FileName = "OxenHub_Mobile_V5" },
+   ConfigurationSaving = { Enabled = true, FileName = "OxenHub_Mobile_FixUI" }, -- Đổi tên file config để fix lỗi mất nút
    Discord = { Enabled = false, Invite = "", RememberJoins = true },
    KeySystem = false,
 })
+
+-- ==============================================================================
+-- 3. CẤU HÌNH LOGIC MỚI (V23 ALL-IN-ONE)
+-- ==============================================================================
+_G.CORE = {
+    -- Aim Config
+    AimEnabled = false,
+    AimReady = false,
+    FOV = 130,
+    Deadzone = 17, -- Logic mới (17) nhưng dùng Slider cũ để chỉnh
+    WallCheck = true,
+    Pred = 0.165,
+    AssistStrength = 0.4,
+    
+    -- ESP Config
+    EspEnabled = true,
+    EspBox = true,
+    EspName = true,
+    EspFFA = false,
+    
+    -- System
+    ScanRate = 0.05
+}
 
 -- Services
 local P = game:GetService("Players")
@@ -90,33 +86,6 @@ local LP = P.LocalPlayer
 local Camera = workspace.CurrentCamera
 local Workspace = game:GetService("Workspace")
 
--- ==============================================================================
--- [TAB MỚI] AimTAB: ALL-IN-ONE SYSTEM (AIM + ESP + SCANNER)
--- ==============================================================================
-local AimTab = Window:CreateTab("AimTAB", 4483362458)
-local AimSection = AimTab:CreateSection("Aimbot & ESP Hybrid System")
-
--- 1. CẤU HÌNH CHUNG
-_G.CORE = {
-    -- Aimbot Config
-    AimEnabled = false,
-    AimReady = false,   -- Trạng thái Warm-up
-    FOV = 130,          -- Vòng Trắng
-    Deadzone = 17,      -- Vòng Đỏ (Khóa)
-    WallCheck = true,
-    Pred = 0.165,
-    AssistStrength = 0.4,
-    
-    -- ESP Config
-    EspEnabled = true,
-    EspBox = true,
-    EspName = true,
-    EspFFA = false,     -- Chế độ FFA (Đỏ hết)
-    
-    -- System Config
-    ScanRate = 0.05     -- Tốc độ quét (0.05s)
-}
-
 local rayParams = RaycastParams.new()
 rayParams.FilterType = Enum.RaycastFilterType.Exclude
 rayParams.IgnoreWater = true
@@ -125,7 +94,11 @@ rayParams.IgnoreWater = true
 local fovCircle = Drawing.new("Circle"); fovCircle.Thickness = 1; fovCircle.NumSides = 40; fovCircle.Filled = false; fovCircle.Color = Color3.fromRGB(255, 255, 255)
 local deadCircle = Drawing.new("Circle"); deadCircle.Thickness = 1.5; deadCircle.NumSides = 20; deadCircle.Filled = false; deadCircle.Color = Color3.fromRGB(255, 0, 0)
 
--- [MODULE] HELPERS
+-- ==============================================================================
+-- 4. LOGIC HOẠT ĐỘNG (GIỮ NGUYÊN BẢN MỚI NHẤT)
+-- ==============================================================================
+
+-- [HELPERS]
 local function CreateESP(char)
     local root = char:WaitForChild("HumanoidRootPart", 5)
     if not root then return end
@@ -143,7 +116,6 @@ local function CreateESP(char)
     txt.Size = UDim2.new(1, 0, 0, 20); txt.Position = UDim2.new(0, 0, -0.25, 0)
     txt.BackgroundTransparency = 1; txt.TextColor3 = Color3.new(1, 1, 1)
     txt.TextStrokeTransparency = 0; txt.TextSize = 12; txt.Font = Enum.Font.GothamBold
-    
     bb.Enabled = false 
 end
 
@@ -171,13 +143,13 @@ end
 
 local TargetCache = {} 
 
--- [CORE] HYBRID SCANNER THREAD
+-- [THREAD: SCANNER]
 task.spawn(function()
     while true do
         local tempAimCache = {}
         local config = _G.CORE
         
-        -- 1. QUÉT PLAYER (ESP + AIM)
+        -- Quét Player
         local allPlayers = P:GetPlayers()
         for i = 1, #allPlayers do
             local p = allPlayers[i]
@@ -187,7 +159,7 @@ task.spawn(function()
                 local hum = char:FindFirstChild("Humanoid")
                 
                 if root and hum and hum.Health > 0 then
-                    -- ESP
+                    -- ESP Logic
                     local espBox = root:FindFirstChild("MobESP")
                     if not espBox then 
                         CreateESP(char)
@@ -218,32 +190,28 @@ task.spawn(function()
                         end
                     end
                     
-                    -- AIM
+                    -- Aim Logic
                     if config.AimEnabled and IsEnemyPlayer(p) then
                         local part = GetAimPart(char)
-                        if part then
-                            tempAimCache[#tempAimCache + 1] = {Part = part, Char = char}
-                        end
+                        if part then tempAimCache[#tempAimCache + 1] = {Part = part, Char = char} end
                     end
                 end
             end
         end
 
-        -- 2. QUÉT BOT (AIM ONLY)
+        -- Quét Bot
         if config.AimEnabled then
             local wsChildren = Workspace:GetChildren()
             for i = 1, #wsChildren do
                 local obj = wsChildren[i]
                 if IsGameBot(obj) then
                     local part = GetAimPart(obj)
-                    if part then
-                        tempAimCache[#tempAimCache + 1] = {Part = part, Char = obj}
-                    end
+                    if part then tempAimCache[#tempAimCache + 1] = {Part = part, Char = obj} end
                 end
             end
         end
 
-        -- 3. UPDATE CACHE
+        -- Update Cache
         if config.AimEnabled then
             if not config.AimReady then
                 TargetCache = tempAimCache
@@ -256,14 +224,12 @@ task.spawn(function()
             config.AimReady = false
             table.clear(TargetCache)
         end
-        
         task.wait(config.ScanRate) 
     end
 end)
-
 P.PlayerAdded:Connect(function(p) p.CharacterAdded:Connect(CreateESP) end)
 
--- [CORE] AIMBOT ENGINE
+-- [RENDER: AIM ENGINE]
 local function GetBestTarget()
     local bestPart, bestHRP = nil, nil
     local shortestDist = math.huge
@@ -285,7 +251,6 @@ local function GetBestTarget()
                         local hit = workspace:Raycast(Camera.CFrame.Position, part.Position - Camera.CFrame.Position, rayParams)
                         if hit and hit.Instance and not hit.Instance:IsDescendantOf(char) then visible = false end
                     end
-
                     if visible and dist < shortestDist then
                         shortestDist = dist
                         bestPart = part
@@ -305,13 +270,8 @@ RS.RenderStepped:Connect(function()
     if conf.AimEnabled then
         fovCircle.Visible = true; fovCircle.Position = center; fovCircle.Radius = conf.FOV
         deadCircle.Visible = true; deadCircle.Position = center; deadCircle.Radius = conf.Deadzone
-        
-        if not conf.AimReady then
-            deadCircle.Color = Color3.fromRGB(255, 255, 0) 
-            return
-        else
-            deadCircle.Color = Color3.fromRGB(255, 0, 0) 
-        end
+        if not conf.AimReady then deadCircle.Color = Color3.fromRGB(255, 255, 0) return
+        else deadCircle.Color = Color3.fromRGB(255, 0, 0) end
     else
         fovCircle.Visible = false; deadCircle.Visible = false
         return
@@ -323,7 +283,6 @@ RS.RenderStepped:Connect(function()
     if aimPart and hrp then
         local predPos = aimPart.Position + (hrp.Velocity * conf.Pred)
         local dist = (Vector2.new(Camera:WorldToViewportPoint(aimPart.Position).X, Camera:WorldToViewportPoint(aimPart.Position).Y) - center).Magnitude
-
         if dist <= conf.Deadzone then
             Camera.CFrame = CFrame.new(Camera.CFrame.Position, predPos) 
         else
@@ -332,41 +291,48 @@ RS.RenderStepped:Connect(function()
     end
 end)
 
--- UI Setup (AimTAB)
-AimSection:CreateLabel("--- AIMBOT (PLAYERS + BOTS) ---")
-AimSection:CreateToggle({Name = "Bật Aimbot", CurrentValue = false, Flag = "Aim", Callback = function(v) _G.CORE.AimEnabled = v end})
-AimSection:CreateSlider({Name = "FOV (Assist)", Range = {50, 300}, Increment = 5, CurrentValue = 130, Callback = function(v) _G.CORE.FOV = v end})
-AimSection:CreateSlider({Name = "Deadzone (Lock)", Range = {5, 50}, Increment = 1, CurrentValue = 17, Callback = function(v) _G.CORE.Deadzone = v end})
-AimSection:CreateToggle({Name = "WallCheck", CurrentValue = true, Flag = "Wall", Callback = function(v) _G.CORE.WallCheck = v end})
-
-AimSection:CreateLabel("--- ESP (PLAYERS ONLY) ---")
-AimSection:CreateToggle({Name = "Bật ESP", CurrentValue = true, Flag = "ESP", Callback = function(v) _G.CORE.EspEnabled = v end})
-AimSection:CreateToggle({Name = "Hiện Box", CurrentValue = true, Callback = function(v) _G.CORE.EspBox = v end})
-AimSection:CreateToggle({Name = "Hiện Tên", CurrentValue = true, Callback = function(v) _G.CORE.EspName = v end})
-AimSection:CreateToggle({Name = "Chế độ FFA (Đỏ Hết)", CurrentValue = false, Callback = function(v) _G.CORE.EspFFA = v end})
-
--- Garbage Collector
-task.spawn(function()
-    while true do
-        for _, p in ipairs(P:GetPlayers()) do
-            if p ~= LP and p.Character then
-                local root = p.Character:FindFirstChild("HumanoidRootPart")
-                if root and not root:FindFirstChild("MobESP") then CreateESP(p.Character) end
-            end
-        end
-        task.wait(3)
-    end
-end)
-
-
 -- ==============================================================================
--- 6. MAIN TAB (COMBAT & MOVEMENT) - GIỮ NGUYÊN PHẦN CÒN LẠI
+-- 5. UI MENU STRUCTURE (CẤU TRÚC MENU CŨ + KẾT NỐI LOGIC MỚI)
 -- ==============================================================================
 local MainTab = Window:CreateTab("Combat", nil)
-local MainSection = MainTab:CreateSection("Combat Helpers")
+local MainSection = MainTab:CreateSection("Aim & Visuals")
 
--- NO RECOIL (GIỮ NGUYÊN)
-_G.NoRecoil = false
+-- CÁC NÚT CŨ NHƯNG ĐIỀU KHIỂN LOGIC MỚI (_G.CORE)
+
+MainTab:CreateToggle({
+    Name = "Enable Aimbot",
+    CurrentValue = false,
+    Flag = "Aim",
+    Callback = function(v) _G.CORE.AimEnabled = v end,
+})
+
+MainTab:CreateSlider({
+    Name = "FOV (Assist Range)",
+    Range = {50, 300}, Increment = 5, CurrentValue = 130,
+    Callback = function(v) _G.CORE.FOV = v end,
+})
+
+MainTab:CreateSlider({
+    Name = "Deadzone (Lock Range)",
+    Range = {5, 50}, Increment = 1, CurrentValue = 17,
+    Callback = function(v) _G.CORE.Deadzone = v end,
+})
+
+MainTab:CreateToggle({
+    Name = "Enable ESP",
+    CurrentValue = true,
+    Flag = "ESP",
+    Callback = function(v) _G.CORE.EspEnabled = v end,
+})
+
+MainTab:CreateToggle({
+    Name = "FFA Mode (All Red)",
+    CurrentValue = false,
+    Flag = "FFAMode",
+    Callback = function(v) _G.CORE.EspFFA = v end,
+})
+
+-- No Recoil (Giữ nguyên logic cũ vì nó độc lập)
 MainTab:CreateToggle({
     Name = "No Recoil (Mobile Fix)",
     CurrentValue = false,
@@ -374,18 +340,15 @@ MainTab:CreateToggle({
     Callback = function(v) 
         _G.NoRecoil = v 
         local BindName = "OxenNoRecoil"
-
         if v then
             local LastRot = workspace.CurrentCamera.CFrame.Rotation
-            game:GetService("RunService"):BindToRenderStep(BindName, Enum.RenderPriority.Camera.Value + 1, function()
+            RS:BindToRenderStep(BindName, Enum.RenderPriority.Camera.Value + 1, function()
                 if not _G.NoRecoil then return end
-                
                 local Cam = workspace.CurrentCamera
                 local CurRot = Cam.CFrame.Rotation
                 local x, y, z = CurRot:ToOrientation()
                 local lx, ly, lz = LastRot:ToOrientation()
-                local dX = math.deg(x - lx) 
-                
+                local dX = math.deg(x - lx)
                 if dX > 0.5 and dX < 15 then
                     Cam.CFrame = CFrame.new(Cam.CFrame.Position) * CFrame.fromOrientation(lx, y, z)
                     LastRot = CFrame.fromOrientation(lx, y, z)
@@ -394,11 +357,12 @@ MainTab:CreateToggle({
                 end
             end)
         else
-            pcall(function() game:GetService("RunService"):UnbindFromRenderStep(BindName) end)
+            pcall(function() RS:UnbindFromRenderStep(BindName) end)
         end
     end,
 })
 
+-- SECTION MOVEMENT (GIỮ NGUYÊN)
 local MoveSection = MainTab:CreateSection("Movement")
 
 MainTab:CreateSlider({
@@ -416,7 +380,6 @@ MainTab:CreateSlider({
    end,
 })
 
-_G.InfJump = false
 MainTab:CreateToggle({
    Name = "Infinite Jump",
    CurrentValue = false,
@@ -432,18 +395,8 @@ MainTab:CreateToggle({
    end,
 })
 
--- ==============================================================================
--- SMOOTH CFRAME FLY V5.1 (UI CẠNH TRÁI + NOCLIP CƯỜNG LỰC)
--- ==============================================================================
-local FlySettings = {
-    Enabled = false,
-    Speed = 1.5,
-    Smoothness = 0.2, 
-    GoingUp = false,
-    GoingDown = false,
-    CurrentVelocity = Vector3.new(0,0,0)
-}
-
+-- SMOOTH FLY (GIỮ NGUYÊN)
+local FlySettings = {Enabled = false, Speed = 1.5, Smoothness = 0.2, GoingUp = false, GoingDown = false, CurrentVelocity = Vector3.new(0,0,0)}
 local MobileFlyUI = nil
 local function ToggleMobileFlyUI(bool)
     if bool then
@@ -453,93 +406,44 @@ local function ToggleMobileFlyUI(bool)
         ScreenGui.Parent = game.CoreGui
 
         local BtnUp = Instance.new("TextButton", ScreenGui)
-        BtnUp.Size = UDim2.new(0, 50, 0, 50)
-        BtnUp.Position = UDim2.new(0, 10, 0.40, 0) 
-        BtnUp.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
-        BtnUp.BackgroundTransparency = 0.4
-        BtnUp.Text = "UP"
-        BtnUp.TextColor3 = Color3.new(1,1,1)
-        BtnUp.Font = Enum.Font.GothamBold
-        Instance.new("UICorner", BtnUp).CornerRadius = UDim.new(1, 0)
+        BtnUp.Size = UDim2.new(0, 50, 0, 50); BtnUp.Position = UDim2.new(0, 10, 0.40, 0) 
+        BtnUp.BackgroundColor3 = Color3.fromRGB(0, 200, 0); BtnUp.BackgroundTransparency = 0.4
+        BtnUp.Text = "UP"; Instance.new("UICorner", BtnUp).CornerRadius = UDim.new(1, 0)
 
         local BtnDown = Instance.new("TextButton", ScreenGui)
-        BtnDown.Size = UDim2.new(0, 50, 0, 50)
-        BtnDown.Position = UDim2.new(0, 10, 0.40, 60) 
-        BtnDown.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
-        BtnDown.BackgroundTransparency = 0.4
-        BtnDown.Text = "DN"
-        BtnDown.TextColor3 = Color3.new(1,1,1)
-        BtnDown.Font = Enum.Font.GothamBold
-        Instance.new("UICorner", BtnDown).CornerRadius = UDim.new(1, 0)
+        BtnDown.Size = UDim2.new(0, 50, 0, 50); BtnDown.Position = UDim2.new(0, 10, 0.40, 60) 
+        BtnDown.BackgroundColor3 = Color3.fromRGB(200, 0, 0); BtnDown.BackgroundTransparency = 0.4
+        BtnDown.Text = "DN"; Instance.new("UICorner", BtnDown).CornerRadius = UDim.new(1, 0)
 
-        BtnUp.InputBegan:Connect(function(input) 
-            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-                FlySettings.GoingUp = true 
-            end
-        end)
-        BtnUp.InputEnded:Connect(function(input) 
-            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-                FlySettings.GoingUp = false 
-            end
-        end)
-
-        BtnDown.InputBegan:Connect(function(input) 
-            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-                FlySettings.GoingDown = true 
-            end
-        end)
-        BtnDown.InputEnded:Connect(function(input) 
-            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-                FlySettings.GoingDown = false 
-            end
-        end)
-        
+        BtnUp.InputBegan:Connect(function(i) if i.UserInputType.Name:match("Touch") then FlySettings.GoingUp = true end end)
+        BtnUp.InputEnded:Connect(function(i) if i.UserInputType.Name:match("Touch") then FlySettings.GoingUp = false end end)
+        BtnDown.InputBegan:Connect(function(i) if i.UserInputType.Name:match("Touch") then FlySettings.GoingDown = true end end)
+        BtnDown.InputEnded:Connect(function(i) if i.UserInputType.Name:match("Touch") then FlySettings.GoingDown = false end end)
         MobileFlyUI = ScreenGui
     else
         if MobileFlyUI then MobileFlyUI:Destroy() end
-        MobileFlyUI = nil
-        FlySettings.GoingUp = false
-        FlySettings.GoingDown = false
+        MobileFlyUI = nil; FlySettings.GoingUp = false; FlySettings.GoingDown = false
         FlySettings.CurrentVelocity = Vector3.new(0,0,0)
     end
 end
-
 local NoclipConn = nil
-
-local function UpdateFly()
-    RS.RenderStepped:Connect(function()
-        if not FlySettings.Enabled then return end
-        
-        local char = LP.Character
-        if not char then return end
-        local root = char:FindFirstChild("HumanoidRootPart")
-        local hum = char:FindFirstChild("Humanoid")
-        if not root or not hum then return end
-
-        root.Velocity = Vector3.new(0, 0, 0)
-        root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-
-        local moveDir = hum.MoveDirection
-        local targetDir = Vector3.new(moveDir.X, 0, moveDir.Z) * FlySettings.Speed
-
-        if FlySettings.GoingUp then 
-            targetDir = targetDir + Vector3.new(0, FlySettings.Speed, 0)
-        elseif FlySettings.GoingDown then 
-            targetDir = targetDir + Vector3.new(0, -FlySettings.Speed, 0)
-        end
-
-        FlySettings.CurrentVelocity = FlySettings.CurrentVelocity:Lerp(targetDir, FlySettings.Smoothness)
-
-        if FlySettings.CurrentVelocity.Magnitude > 0.01 then
-            root.CFrame = root.CFrame + FlySettings.CurrentVelocity
-        else
-            FlySettings.CurrentVelocity = Vector3.new(0,0,0)
-        end
-        
-        hum.PlatformStand = true 
-    end)
-end
-UpdateFly()
+RS.RenderStepped:Connect(function()
+    if not FlySettings.Enabled then return end
+    local char = LP.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChild("Humanoid")
+    if not root or not hum then return end
+    root.Velocity = Vector3.zero
+    local moveDir = hum.MoveDirection
+    local targetDir = Vector3.new(moveDir.X, 0, moveDir.Z) * FlySettings.Speed
+    if FlySettings.GoingUp then targetDir = targetDir + Vector3.new(0, FlySettings.Speed, 0)
+    elseif FlySettings.GoingDown then targetDir = targetDir + Vector3.new(0, -FlySettings.Speed, 0) end
+    FlySettings.CurrentVelocity = FlySettings.CurrentVelocity:Lerp(targetDir, FlySettings.Smoothness)
+    if FlySettings.CurrentVelocity.Magnitude > 0.01 then root.CFrame = root.CFrame + FlySettings.CurrentVelocity
+    else FlySettings.CurrentVelocity = Vector3.zero end
+    hum.PlatformStand = true 
+end)
 
 MainTab:CreateToggle({
     Name = "Smooth Fly (Side UI + Noclip)",
@@ -548,48 +452,40 @@ MainTab:CreateToggle({
     Callback = function(v)
         FlySettings.Enabled = v
         ToggleMobileFlyUI(v) 
-        
         if v then
             if NoclipConn then NoclipConn:Disconnect() end
-            NoclipConn = game:GetService("RunService").Stepped:Connect(function()
+            NoclipConn = RS.Stepped:Connect(function()
                 if LP.Character then
                     for _, part in pairs(LP.Character:GetDescendants()) do
-                        if part:IsA("BasePart") and part.CanCollide then
-                            part.CanCollide = false
-                        end
+                        if part:IsA("BasePart") and part.CanCollide then part.CanCollide = false end
                     end
                 end
             end)
         else
             if NoclipConn then NoclipConn:Disconnect() end
             NoclipConn = nil
-            
             if LP.Character then
                 local hum = LP.Character:FindFirstChild("Humanoid")
                 if hum then hum.PlatformStand = false end
                 workspace.Gravity = 196.2
                 for _, part in pairs(LP.Character:GetDescendants()) do
-                    if part:IsA("BasePart") then
-                        part.CanCollide = true
-                    end
+                    if part:IsA("BasePart") then part.CanCollide = true end
                 end
             end
         end
     end,
 })
+MainTab:CreateSlider({Name = "Fly Speed", Range = {0.5, 5}, Increment = 0.1, CurrentValue = 1.5, Callback = function(v) FlySettings.Speed = v end})
 
-MainTab:CreateSlider({
-    Name = "Fly Speed",
-    Range = {0.5, 5}, Increment = 0.1, CurrentValue = 1.5,
-    Callback = function(v) 
-        FlySettings.Speed = v 
-    end,
-})
-
-MainTab:CreateSlider({
-    Name = "Smoothness",
-    Range = {0.01, 0.5}, Increment = 0.01, CurrentValue = 0.2,
-    Callback = function(v) 
-        FlySettings.Smoothness = v 
-    end,
-})
+-- GARBAGE COLLECTOR (QUÉT SÓT)
+task.spawn(function()
+    while true do
+        for _, p in ipairs(P:GetPlayers()) do
+            if p ~= LP and p.Character then
+                local root = p.Character:FindFirstChild("HumanoidRootPart")
+                if root and not root:FindFirstChild("MobESP") then CreateESP(p.Character) end
+            end
+        end
+        task.wait(3)
+    end
+end)
