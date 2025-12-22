@@ -8,18 +8,10 @@
 
     [+] SCRIPT INFO:
         - Name: Oxen Hub - Mobile Final
-        - Version: V47 (Absolute Lock & Ghost Tween)
-        - Executor: Delta X / Hydrogen / Fluxus
-    
-    [+] FIX LOG V47:
-        1. AIMBOT: 
-           - Idle: 0% can thiệp (Mượt tuyệt đối).
-           - Shooting: 100% Hard Lock (Ghim chết tâm).
-        2. BACKSTAB:
-           - Tích hợp Noclip (Đi xuyên tường) khi đang Tween.
-        3. CORE:
-           - Giữ nguyên Scanner V41 (Loop).
-           - Giữ nguyên Global Visuals.
+        - Version: V49 (Hybrid God)
+        - Structure: V48 (Ghost Backstab, TeamCheck, Global Visuals).
+        - Aim Engine: V41 ORIGINAL RESTORED (Dual Zone Logic - No Trigger Required).
+        - Executor: Delta X / Hydrogen / Fluxus / Arceus X.
 ]]
 
 -- [INIT] Wait for Game Load
@@ -56,13 +48,14 @@ local CF = CFrame.new
 -- [SECTION 2] CORE CONFIGURATION
 -- ==============================================================================
 _G.CORE = {
-    -- Aimbot Config
+    -- Aimbot Config (V41 Settings)
     AimEnabled = false,
     AimReady = false,      -- Warm-up check
     FOV = 110,             -- Cố định 110 (Xanh Dương)
     Deadzone = 17,         -- Cố định 17 (Xanh Lá)
     WallCheck = true,
     Pred = 0.165,
+    AssistStrength = 0.4,  -- Độ hút tâm khi ở ngoài Deadzone
     
     -- Visuals Config
     EspEnabled = true,
@@ -74,18 +67,18 @@ _G.CORE = {
     BackstabEnabled = false,
     BackstabSpeed = 50,    -- Tốc độ Tween
     BackstabDist = 1.2,    -- Khoảng cách (1.2m sau lưng)
-    BackstabTeamCheck = true,
+    BackstabTeamCheck = true, -- Check team
     
     -- Movement Config
     WalkSpeedValue = 25,
     InfiniteJump = false,
     
     -- System Config
-    ScanRate = 0.05        -- Tốc độ quét tối ưu cho Loop Scanner
+    ScanRate = 0.05        -- Tốc độ quét tối ưu
 }
 
 -- ==============================================================================
--- [SECTION 3] ANTI-BAN SYSTEM V5 (TITAN LEGACY)
+-- [SECTION 3] ANTI-BAN SYSTEM V5 (ADVANCED PROTECTION)
 -- ==============================================================================
 local function EnableAntiBanV5()
     -- Kiểm tra hỗ trợ hook
@@ -138,9 +131,9 @@ end
 task.spawn(function() pcall(EnableAntiBanV5) end)
 
 -- ==============================================================================
--- [SECTION 4] DRAWING LOGIC (GLOBAL FIX FOR DELTA X)
+-- [SECTION 4] DRAWING LOGIC (GLOBAL SCOPE - DELTA X FIX)
 -- ==============================================================================
--- KHÔNG ĐƯỢC BỌC TRONG FUNCTION HAY PCALL
+-- KHÔNG DÙNG PCALL, KHÔNG DÙNG CHECK NIL ĐỂ TRÁNH XUNG ĐỘT DELTA X
 
 local fovCircle = Drawing.new("Circle")
 fovCircle.Thickness = 1
@@ -159,14 +152,14 @@ deadCircle.Transparency = 1
 deadCircle.Visible = false
 
 -- ==============================================================================
--- [SECTION 5] SCANNER SYSTEM (V41 LEGACY LOOP - RESTORED)
+-- [SECTION 5] SCANNER SYSTEM (V41 LEGACY LOOP - PRESERVED)
 -- ==============================================================================
 local TargetCache = {}
 local rayParams = RaycastParams.new()
 rayParams.FilterType = Enum.RaycastFilterType.Exclude
 rayParams.IgnoreWater = true
 
--- Helper: Check Enemy (Team Check Logic)
+-- Helper: Check Enemy
 local function IsEnemy(p)
     if not p or p == LocalPlayer then return false end
     if LocalPlayer.Neutral or p.Neutral then return true end
@@ -234,7 +227,7 @@ local function CreateESP(char)
     bb.Enabled = false 
 end
 
--- Main Scanner Loop (V41 Logic - KEEPING AS REQUESTED)
+-- Main Scanner Loop (V41 Logic - 100% PRESERVED)
 task.spawn(function()
     while true do
         local tempCache = {}
@@ -325,7 +318,7 @@ task.spawn(function()
 
         TargetCache = tempCache
         
-        -- Warmup Check
+        -- Warmup Check (Logic cũ)
         if config.AimEnabled then
             if not config.AimReady then
                 task.wait(1.5)
@@ -348,9 +341,9 @@ Players.PlayerAdded:Connect(function(p)
 end)
 
 -- ==============================================================================
--- [SECTION 6] AIM ENGINE (ABSOLUTE LOCK MODE)
+-- [SECTION 6] AIM ENGINE (V41 ORIGINAL RESTORED)
 -- ==============================================================================
--- FIX: Loại bỏ hoàn toàn sự can thiệp camera khi không bắn
+-- Đây là logic Aim của bản V41/obfasl.lua (Dual Zone, không cần bấm nút)
 
 local function GetBestTarget()
     local bestPart = nil
@@ -366,7 +359,7 @@ local function GetBestTarget()
             if onScreen then
                 local dist = (V2(pos.X, pos.Y) - center).Magnitude
                 
-                -- Check trong vòng FOV
+                -- Check trong vòng FOV (110)
                 if dist <= _G.CORE.FOV then
                     local visible = true
                     if _G.CORE.WallCheck then
@@ -387,11 +380,12 @@ local function GetBestTarget()
     return bestPart
 end
 
+-- RENDERSTEPPED LOOP (CẬP NHẬT MỖI KHUNG HÌNH)
 RunService.RenderStepped:Connect(function()
     local center = V2(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     local conf = _G.CORE
     
-    -- [VISUALS]
+    -- [VISUALS] Cập nhật Drawing
     if conf.AimEnabled then
         fovCircle.Visible = true
         fovCircle.Position = center
@@ -401,10 +395,11 @@ RunService.RenderStepped:Connect(function()
         deadCircle.Position = center
         deadCircle.Radius = conf.Deadzone
         
+        -- Hiệu ứng màu trạng thái
         if not conf.AimReady then
-            deadCircle.Color = Color3.fromRGB(255, 255, 0)
+            deadCircle.Color = Color3.fromRGB(255, 255, 0) -- Vàng (Chờ)
         else
-            deadCircle.Color = Color3.fromRGB(0, 255, 0)
+            deadCircle.Color = Color3.fromRGB(0, 255, 0)   -- Xanh Lá (Ready)
         end
     else
         fovCircle.Visible = false
@@ -412,14 +407,12 @@ RunService.RenderStepped:Connect(function()
         return
     end
 
-    -- [AIM LOGIC - FIXED]
-    local isShooting = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) or UserInputService:IsMouseButtonPressed(Enum.UserInputType.Touch)
-
-    if conf.AimReady and isShooting then
+    -- [AIM LOGIC - V41 ORIGINAL]
+    if conf.AimReady then
         local targetData = GetBestTarget()
         
         if targetData then
-            -- Chuyển màu Đỏ khi tìm thấy mục tiêu lúc đang bắn
+            -- Khi khóa trúng -> Deadzone chuyển màu Đỏ (Locked)
             deadCircle.Color = Color3.fromRGB(255, 0, 0) 
             
             local aimPart = targetData.Part
@@ -431,26 +424,22 @@ RunService.RenderStepped:Connect(function()
             local screenPos = WorldToViewportPoint(Camera, aimPart.Position)
             local distToCenter = (V2(screenPos.X, screenPos.Y) - center).Magnitude
             
-            -- ABSOLUTE LOCK: Ghim chặt 100% không dùng Lerp
-            -- Chỉ ghim khi bắn. Khi không bắn: KHÔNG LÀM GÌ CẢ (Camera tự do)
+            -- Dual Zone Aiming: 
+            -- Trong vòng xanh lá (Deadzone) => Khóa cứng
+            -- Ngoài vòng xanh lá, trong vòng xanh dương (FOV) => Kéo tâm nhẹ
             if distToCenter <= conf.Deadzone then
-                 Camera.CFrame = CF(Camera.CFrame.Position, predPos)
+                Camera.CFrame = CF(Camera.CFrame.Position, predPos) -- Hard Lock
             else
-                -- Nằm ngoài Deadzone nhưng trong FOV thì hỗ trợ nhẹ
-                 Camera.CFrame = Camera.CFrame:Lerp(CF(Camera.CFrame.Position, predPos), 0.5) 
+                Camera.CFrame = Camera.CFrame:Lerp(CF(Camera.CFrame.Position, predPos), conf.AssistStrength) -- Soft Assist
             end
         end
-    else
-        -- FIX AIM GIẬT:
-        -- Khi không bắn, không có bất kỳ lệnh nào can thiệp Camera
-        -- Giữ nguyên vòng tròn màu xanh để ngắm
     end
 end)
 
 -- ==============================================================================
--- [SECTION 7] BACKSTAB ENGINE (GHOST TWEEN)
+-- [SECTION 7] BACKSTAB ENGINE (GHOST TWEEN & TEAM CHECK)
 -- ==============================================================================
--- FIX: Thêm Noclip xuyên tường khi Tween
+-- Logic nâng cấp từ bản V48: Ghost Mode (Đi xuyên tường) + Team Check
 
 local CurrentBS_Target = nil
 
@@ -459,7 +448,7 @@ local function GetNearestBackstab()
     for i = 1, #TargetCache do
         local d = TargetCache[i]
         
-        -- Team Check
+        -- TEAM CHECK LOGIC
         local isTeammate = false
         if _G.CORE.BackstabTeamCheck and d.Player then
              if d.Player.Team == LocalPlayer.Team and d.Player.Team ~= nil then
@@ -478,6 +467,7 @@ local function GetNearestBackstab()
 end
 
 RunService.Heartbeat:Connect(function()
+    -- Nếu tắt chức năng thì reset và thoát
     if not _G.CORE.BackstabEnabled then 
         CurrentBS_Target = nil
         return 
@@ -488,24 +478,25 @@ RunService.Heartbeat:Connect(function()
     
     if not myRoot then return end
 
-    -- 1. VALIDATION
+    -- 1. VALIDATION (Kiểm tra mục tiêu hiện tại)
     if CurrentBS_Target then
         local hum = FindFirstChild(CurrentBS_Target, "Humanoid")
         local root = FindFirstChild(CurrentBS_Target, "HumanoidRootPart")
+        
+        -- Nếu mục tiêu chết (Máu <= 0), mất root, hoặc biến mất khỏi game -> Hủy ngay
         if not hum or hum.Health <= 0 or not root or not CurrentBS_Target.Parent then
             CurrentBS_Target = nil 
         end
     end
     
-    -- 2. ACQUISITION
+    -- 2. ACQUISITION (Nếu chưa có mục tiêu, lấy từ Cache)
     if not CurrentBS_Target then
         CurrentBS_Target = GetNearestBackstab()
     end
     
-    -- 3. EXECUTION
+    -- 3. EXECUTION (Thực thi Backstab với Ghost Mode)
     if CurrentBS_Target then
-        -- [GHOST MODE / NOCLIP]
-        -- Khi đã xác định được mục tiêu, lập tức tắt va chạm để xuyên tường
+        -- [GHOST MODE / NOCLIP] Tự động đi xuyên tường khi Backstab
         for _, v in pairs(myChar:GetDescendants()) do
             if v:IsA("BasePart") and v.CanCollide then
                 v.CanCollide = false
@@ -514,26 +505,34 @@ RunService.Heartbeat:Connect(function()
         
         local tRoot = FindFirstChild(CurrentBS_Target, "HumanoidRootPart")
         if tRoot then
+            -- Tính toán vị trí: Sau lưng
             local backOffset = CF(0, 0, _G.CORE.BackstabDist)
             local targetCFrame = tRoot.CFrame * backOffset
+            
+            -- Tính khoảng cách
             local dist = (myRoot.Position - targetCFrame.Position).Magnitude
+            
+            -- Tốc độ Tween
             local speed = math.max(_G.CORE.BackstabSpeed, 20)
             local duration = dist / speed
-            
             if duration < 0.03 then duration = 0.03 end 
             
+            -- Tween
             if dist > 0.5 then
                 local tInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out)
                 local tween = TweenService:Create(myRoot, tInfo, {CFrame = targetCFrame})
                 tween:Play()
             else
+                -- Sticky Effect (Dính)
                 myRoot.CFrame = myRoot.CFrame:Lerp(targetCFrame, 0.5)
             end
             
+            -- Anti-Cheat Velocity
             if tRoot.AssemblyLinearVelocity then
                 myRoot.AssemblyLinearVelocity = tRoot.AssemblyLinearVelocity
             end
             
+            -- Look at target
             local lookPos = V3(tRoot.Position.X, myRoot.Position.Y, tRoot.Position.Z)
             myRoot.CFrame = CFrame.lookAt(myRoot.Position, lookPos)
         end
@@ -547,20 +546,20 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 local Window = Rayfield:CreateWindow({
    Name = "Oxen Hub - Mobile Final",
    Icon = 0,
-   LoadingTitle = "Oxen-Hub V47",
-   LoadingSubtitle = "Absolute Lock",
+   LoadingTitle = "Oxen-Hub V49",
+   LoadingSubtitle = "Hybrid God Mode",
    Theme = "Default",
    DisableRayfieldPrompts = false,
-   ConfigurationSaving = { Enabled = true, FileName = "OxenHub_V47_Final" },
+   ConfigurationSaving = { Enabled = true, FileName = "OxenHub_V49_Final" },
    KeySystem = false,
 })
 
 -- === TAB 1: COMBAT ===
 local CombatTab = Window:CreateTab("Combat", nil)
-CombatTab:CreateSection("Absolute Aimbot")
+CombatTab:CreateSection("Aimbot (V41 Logic - Dual Zone)")
 
 CombatTab:CreateToggle({
-    Name = "Enable Aimbot (Hold Shoot to Lock)",
+    Name = "Enable Aimbot (Auto Lock)",
     CurrentValue = false,
     Flag = "Aim",
     Callback = function(v) _G.CORE.AimEnabled = v end,
@@ -639,7 +638,7 @@ VisualsTab:CreateToggle({
 -- === TAB 3: MOVEMENT ===
 local MoveTab = Window:CreateTab("Movement", nil)
 
-MoveTab:CreateSection("Backstab V3 (Ghost Mode)")
+MoveTab:CreateSection("Backstab V3 (Ghost + TeamCheck)")
 MoveTab:CreateToggle({
     Name = "Auto Backstab (Continuous)",
     CurrentValue = false,
@@ -658,7 +657,6 @@ MoveTab:CreateSlider({
     Range = {20, 200}, Increment = 5, CurrentValue = 50,
     Callback = function(v) _G.CORE.BackstabSpeed = v end
 })
-MoveTab:CreateLabel("Tự động xuyên tường khi Backstab hoạt động")
 
 MoveTab:CreateSection("Character Mods")
 MoveTab:CreateSlider({
@@ -790,4 +788,4 @@ task.spawn(function()
     end
 end)
 
-Rayfield:Notify({Title = "Oxen Hub Final", Content = "V47: Absolute Lock & Ghost Tween", Duration = 5})
+Rayfield:Notify({Title = "Oxen Hub Final", Content = "V49: Hybrid God Loaded", Duration = 5})
