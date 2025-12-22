@@ -1,23 +1,12 @@
---[[
-    NAME: Oxen Hub - Mobile Final
-    VERSION: V36 (Custom Colors Edition)
-    OPTIMIZED FOR: Delta X, Hydrogen, Fluxus
-    
-    CHANGELOG V36:
-    - [x] FOV Circle -> Xanh Dương (Blue)
-    - [x] Deadzone Circle -> Xanh Lá (Green)
-    - [x] Full Anti-Ban V5 (Hook Metamethods + Network Throttle)
-    - [x] Hybrid Scanner V3 (Player + Bot + ForceField Check)
-    - [x] Drawing Engine V2 (Self-Healing Logic - Never Disappear)
-    - [x] Restored All Features (Fly, Noclip, Walkspeed, InfJump, NoRecoil)
-]]
 
--- Chờ game load xong hoàn toàn để tránh crash script
-repeat task.wait() until game:IsLoaded() and game.Players.LocalPlayer
-task.wait(2) -- Đợi thêm 2s cho ổn định mạng
+
+-- [INIT] Chờ game tải xong
+repeat task.wait() until game:IsLoaded()
+repeat task.wait() until game.Players.LocalPlayer
+task.wait(1.5) -- Delay nhẹ để ổn định FPS lúc inject
 
 -- ==============================================================================
--- [SECTION 1] SERVICES & UTILITIES (CÁC DỊCH VỤ CỐT LÕI)
+-- [SECTION 1] SERVICES & VARIABLES
 -- ==============================================================================
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -25,87 +14,87 @@ local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 local CoreGui = game:GetService("CoreGui")
+local HttpService = game:GetService("HttpService")
+
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
+local Mouse = LocalPlayer:GetMouse()
 
--- Hàm tạo Drawing an toàn (Tránh lỗi trên một số Executor yếu)
-local function SafeDrawing(type)
-    local success, object = pcall(function() return Drawing.new(type) end)
-    if success and object then return object end
-    return nil
-end
+-- Cache Services (Tăng tốc độ truy xuất)
+local FindFirstChild = game.FindFirstChild
+local FindFirstChildOfClass = game.FindFirstChildOfClass
+local WaitForChild = game.WaitForChild
+local WorldToViewportPoint = Camera.WorldToViewportPoint
+local GetPlayers = Players.GetPlayers
 
 -- ==============================================================================
--- [SECTION 2] CORE CONFIGURATION (CẤU HÌNH TỔNG)
+-- [SECTION 2] CORE CONFIGURATION
 -- ==============================================================================
 _G.CORE = {
-    -- AIMBOT CONFIG (Đã cố định theo yêu cầu)
+    -- Aim Config
     AimEnabled = false,
-    AimReady = false,      -- Biến trạng thái Warm-up
-    FOV = 110,             -- Góc nhìn hỗ trợ (Cố định)
-    Deadzone = 17,         -- Vòng khóa cứng (Cố định)
-    WallCheck = true,      -- Kiểm tra tường
-    Pred = 0.165,          -- Dự đoán chuyển động
-    AssistStrength = 0.4,  -- Độ mượt khi kéo tâm
+    AimReady = false,      -- Warm-up check
+    FOV = 110,             -- Màu Xanh Dương
+    Deadzone = 17,         -- Màu Xanh Lá
+    WallCheck = true,
+    Pred = 0.165,
+    AssistStrength = 0.4,
     
-    -- VISUALS CONFIG
-    EspEnabled = true,     -- Master Switch
+    -- Visuals Config
+    EspEnabled = true,
     EspBox = true,
     EspName = true,
-    EspFFA = false,        -- Chế độ hiện tất cả (Free For All)
+    EspFFA = false,
     
-    -- MOVEMENT & COMBAT
+    -- Backstab Config
     BackstabEnabled = false,
-    BackstabSpeed = 50,    -- Tốc độ bay ra sau lưng (Slider)
-    BackstabDist = 1.2,    -- Khoảng cách an toàn (~0.3 mét)
-    WalkSpeedValue = 25,   -- Tốc độ chạy mặc định
+    BackstabSpeed = 50,    -- Tốc độ Tween (Studs/s)
+    BackstabDist = 1.2,    -- Khoảng cách sau lưng (0.3m ~ 1.2 studs)
     
-    -- SYSTEM OPTIMIZATION
-    ScanRate = 0.1,        -- Tốc độ quét (0.1s = 10 lần/giây -> Tiết kiệm Pin)
-    TargetLocking = false  -- Biến kiểm tra đang khóa mục tiêu hay không
+    -- Movement Config
+    WalkSpeedValue = 25,
+    InfiniteJump = false,
+    
+    -- System Config
+    ScanRate = 0.05        -- Tốc độ làm mới Cache (Rất nhanh)
 }
 
 -- ==============================================================================
--- [SECTION 3] ANTI-BAN SYSTEM V5 (BẢO VỆ CAO CẤP)
+-- [SECTION 3] ANTI-BAN SYSTEM V5
 -- ==============================================================================
-local function ActivateAntiBan()
-    -- Kiểm tra xem Executor có hỗ trợ Hook không
+local function EnableAntiBanV5()
+    -- Kiểm tra hỗ trợ hook
     if not (hookmetamethod and getnamecallmethod) then 
-        warn("OxenHub: Executor không hỗ trợ Hook Metamethod -> Anti-Ban bị hạn chế.")
+        warn("OxenHub: Executor không hỗ trợ Hook -> Anti-Ban hạn chế.")
         return 
     end
     
     local bannedMethods = {
         ["Kick"] = true,
         ["Shutdown"] = true,
-        ["BreakJoints"] = true, -- Một số game dùng cái này để giết hacker
-        ["Destroy"] = true      -- Hoặc destroy character
+        ["BreakJoints"] = true,
+        ["Destroy"] = true
     }
     
     local oldNamecall
     oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
         local method = getnamecallmethod()
-        local caller = checkcaller and checkcaller() or false
         
-        -- Chỉ can thiệp vào các lệnh do GAME gọi (không phải do Script mình gọi)
-        if not caller then
-            -- 1. Chặn các lệnh Kick/Ban trực tiếp
-            if bannedMethods[method] then 
-                return nil -- Trả về rỗng -> Vô hiệu hóa lệnh
-            end
+        -- Chỉ chặn khi Game gọi lệnh (Executor gọi thì cho qua)
+        if not checkcaller() then
+            -- 1. Chặn Kick/Ban
+            if bannedMethods[method] then return nil end
             
-            -- 2. Chặn gửi báo cáo lỗi (Error Logging)
-            if method == "SetCore" and (self.Name == "StarterGui" or tostring(self) == "StarterGui") then
+            -- 2. Chặn Error Logs (SetCore)
+            if method == "SetCore" and tostring(self) == "StarterGui" then
                 local args = {...}
                 if args[1] == "SendNotification" then return nil end
             end
             
-            -- 3. Chặn Remote Event nguy hiểm (FireServer)
-            -- Đây là cách game mobile hay dùng để flag hacker
+            -- 3. Chặn Remote Flag
             if method == "FireServer" or method == "InvokeServer" then
-                local remoteName = tostring(self.Name):lower()
-                -- Các từ khóa nhạy cảm thường dùng trong Anti-Cheat
-                if remoteName:match("ban") or remoteName:match("kick") or remoteName:match("flag") or remoteName:match("detect") or remoteName:match("security") then
+                local rName = tostring(self.Name):lower()
+                if rName:match("ban") or rName:match("kick") or rName:match("flag") or rName:match("detect") then
                     return nil
                 end
             end
@@ -113,329 +102,457 @@ local function ActivateAntiBan()
         return oldNamecall(self, ...)
     end)
     
-    -- Hook Index để Fake thông tin người chơi (Tránh check Account Age)
+    -- Hook Index (Fake Info)
     local oldIndex
     oldIndex = hookmetamethod(game, "__index", function(self, key)
         if not checkcaller() and self == LocalPlayer then
-            if key == "AccountAge" then return 365 end -- Giả mạo nick 1 năm tuổi
-            if key == "UserId" then return math.random(1000000, 9999999) end -- Fake ID ngẫu nhiên
+            if key == "AccountAge" then return 365 end 
+            if key == "UserId" then return math.random(1000000, 9999999) end
+            if key == "OsPlatform" then return "Android" end
         end
         return oldIndex(self, key)
     end)
     
-    -- Network Throttle: Reset bộ đếm remote mỗi frame để tránh bị kick do spam
-    RunService.Heartbeat:Connect(function() 
-        -- Logic placeholder cho bộ đếm (nếu cần mở rộng sau này)
-    end)
+    print("Anti-Ban V5: Active")
 end
-
--- Kích hoạt Anti-Ban trong luồng bảo vệ
-task.spawn(function() pcall(ActivateAntiBan) end)
+task.spawn(function() pcall(EnableAntiBanV5) end)
 
 -- ==============================================================================
--- [SECTION 4] VISUAL ENGINE (CUSTOM COLORS & SELF-HEALING)
+-- [SECTION 4] DRAWING ENGINE (DIRECT LOGIC)
 -- ==============================================================================
-local fovCircle = nil
-local deadCircle = nil
+-- Logic vẽ trực tiếp, không qua hàm bọc để đảm bảo hiện trên Delta X
 
--- Hàm kiểm tra và tạo lại vòng tròn nếu bị mất (Self-Healing)
--- Logic này đảm bảo vòng tròn LUÔN LUÔN tồn tại
-local function CheckDrawingObjects()
-    -- 1. FOV Circle (Màu Xanh Dương - Blue)
-    if not fovCircle then
-        local s, o = pcall(function() return Drawing.new("Circle") end)
-        if s and o then
-            fovCircle = o
-            fovCircle.Visible = false
-            fovCircle.Thickness = 1.5
-            fovCircle.NumSides = 40     -- Giảm giác để tối ưu FPS mobile
-            fovCircle.Filled = false
-            fovCircle.Transparency = 0.8
-            fovCircle.Color = Color3.fromRGB(0, 190, 255) -- XANH DƯƠNG SÁNG
-        end
-    end
-    
-    -- 2. Deadzone Circle (Màu Xanh Lá - Green)
-    if not deadCircle then
-        local s, o = pcall(function() return Drawing.new("Circle") end)
-        if s and o then
-            deadCircle = o
-            deadCircle.Visible = false
-            deadCircle.Thickness = 1.5
-            deadCircle.NumSides = 24
-            deadCircle.Filled = false
-            deadCircle.Transparency = 0.8
-            deadCircle.Color = Color3.fromRGB(0, 255, 0) -- XANH LÁ
-        end
-    end
-end
+local fovCircle = Drawing.new("Circle")
+fovCircle.Thickness = 1
+fovCircle.NumSides = 40 -- Giảm giác để mượt hơn
+fovCircle.Filled = false
+fovCircle.Color = Color3.fromRGB(0, 170, 255) -- XANH DƯƠNG
+fovCircle.Transparency = 1
+fovCircle.Visible = false
+
+local deadCircle = Drawing.new("Circle")
+deadCircle.Thickness = 1.5
+deadCircle.NumSides = 24
+deadCircle.Filled = false
+deadCircle.Color = Color3.fromRGB(0, 255, 0) -- XANH LÁ
+deadCircle.Transparency = 1
+deadCircle.Visible = false
 
 -- ==============================================================================
--- [SECTION 5] TARGET SCANNER & ESP SYSTEM (V3 HYBRID)
+-- [SECTION 5] HYBRID SCANNER SYSTEM (THE CORE)
 -- ==============================================================================
-local TargetCache = {} -- Lưu danh sách mục tiêu hợp lệ
+-- TargetCache: Là biến toàn cục dùng chung cho cả Aim, ESP và Backstab
+-- Cấu trúc dữ liệu: { Part, Char, Root, Humanoid, Dist }
+local TargetCache = {} 
 
--- Hàm kiểm tra địch thủ (Hỗ trợ Team Check & Neutral)
+local rayParams = RaycastParams.new()
+rayParams.FilterType = Enum.RaycastFilterType.Exclude
+rayParams.IgnoreWater = true
+
+-- Helper: Check Enemy
 local function IsEnemy(p)
     if not p or p == LocalPlayer then return false end
-    if LocalPlayer.Neutral or p.Neutral then return true end -- Đấu đơn
-    return p.Team ~= LocalPlayer.Team -- Đấu đội
+    if LocalPlayer.Neutral or p.Neutral then return true end
+    if not p.Team or not LocalPlayer.Team then return true end
+    return p.Team ~= LocalPlayer.Team
 end
 
--- Hàm lấy bộ phận ngắm tốt nhất (Head -> Torso -> Root)
--- Tương thích cả R6 và R15
+-- Helper: Check Bot
+local function IsGameBot(model)
+    if not model or not model:IsA("Model") or model == LocalPlayer.Character then return false end
+    local hum = FindFirstChild(model, "Humanoid")
+    local root = FindFirstChild(model, "HumanoidRootPart")
+    
+    if not hum or hum.Health <= 0 or not root then return false end
+    if Players:GetPlayerFromCharacter(model) then return false end
+    if FindFirstChildOfClass(model, "ForceField") then return false end -- Bỏ qua bất tử
+    
+    return true
+end
+
+-- Helper: Get Aim Part
 local function GetAimPart(char)
     if not char then return nil end
-    return char:FindFirstChild("Head") or 
-           char:FindFirstChild("UpperTorso") or 
-           char:FindFirstChild("HumanoidRootPart") or 
-           char:FindFirstChild("Torso")
+    return FindFirstChild(char, "Head") or 
+           FindFirstChild(char, "UpperTorso") or 
+           FindFirstChild(char, "HumanoidRootPart") or 
+           FindFirstChild(char, "Torso")
 end
 
--- Hàm tạo/cập nhật ESP (Dùng chung cho Scanner và GC)
-local function UpdateESP(root, nameText, isEnemy)
-    if not _G.CORE.EspEnabled then 
-        if root:FindFirstChild("MobESP") then root.MobESP.Enabled = false end
-        return 
-    end
+-- Helper: Create ESP
+local function CreateESP(char)
+    local root = WaitForChild(char, "HumanoidRootPart", 5)
+    if not root then return end
+    
+    if root:FindFirstChild("MobESP") then root.MobESP:Destroy() end
 
-    local esp = root:FindFirstChild("MobESP")
-    if not esp then
-        -- Tạo mới BillboardGui
-        local bb = Instance.new("BillboardGui", root)
-        bb.Name = "MobESP"
-        bb.Size = UDim2.new(4, 0, 5.5, 0)
-        bb.AlwaysOnTop = true
-        bb.MaxDistance = 500 -- Giới hạn tầm nhìn để đỡ lag
-        
-        local frame = Instance.new("Frame", bb)
-        frame.Size = UDim2.new(1, 0, 1, 0)
-        frame.BackgroundTransparency = 1
-        
-        local stroke = Instance.new("UIStroke", frame)
-        stroke.Thickness = 1.5
-        
-        local label = Instance.new("TextLabel", bb)
-        label.Size = UDim2.new(1, 0, 0, 20)
-        label.Position = UDim2.new(0, 0, -0.25, 0)
-        label.BackgroundTransparency = 1
-        label.Font = Enum.Font.GothamBold
-        label.TextSize = 10
-        label.TextColor3 = Color3.new(1, 1, 1)
-        
-        esp = bb
-    end
+    local bb = Instance.new("BillboardGui")
+    bb.Name = "MobESP"
+    bb.Adornee = root
+    bb.Size = UDim2.new(4, 0, 5.5, 0)
+    bb.AlwaysOnTop = true
+    bb.Parent = root
+    bb.MaxDistance = 500
+
+    local frame = Instance.new("Frame", bb)
+    frame.Size = UDim2.new(1, 0, 1, 0)
+    frame.BackgroundTransparency = 1
     
-    esp.Enabled = true
-    local isTarget = isEnemy or _G.CORE.EspFFA
+    local stroke = Instance.new("UIStroke", frame)
+    stroke.Thickness = 1.5
+
+    local txt = Instance.new("TextLabel", bb)
+    txt.Size = UDim2.new(1, 0, 0, 20)
+    txt.Position = UDim2.new(0, 0, -0.25, 0)
+    txt.BackgroundTransparency = 1
+    txt.TextColor3 = Color3.new(1, 1, 1)
+    txt.TextStrokeTransparency = 0
+    txt.TextSize = 10
+    txt.Font = Enum.Font.GothamBold
     
-    -- Màu sắc ESP: Đỏ (Địch) vs Xanh (Đồng đội)
-    local color = isTarget and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(0, 255, 255)
-    
-    esp.Frame.UIStroke.Color = color
-    esp.Frame.UIStroke.Enabled = _G.CORE.EspBox
-    esp.TextLabel.Visible = _G.CORE.EspName
-    
-    local dist = math.floor((root.Position - Camera.CFrame.Position).Magnitude)
-    esp.TextLabel.Text = string.format("%s\n[%dm]", nameText, dist)
+    bb.Enabled = false 
 end
 
--- MAIN SCANNER THREAD (Chạy ngầm)
+-- [MAIN THREAD] - SCANNER
+-- Luồng này chịu trách nhiệm duy nhất là cập nhật TargetCache và ESP
 task.spawn(function()
     while true do
-        local config = _G.CORE
         local tempCache = {}
-        local pCount = 0
+        local config = _G.CORE
         
-        -- 1. Quét Người chơi (Players)
-        for _, p in ipairs(Players:GetPlayers()) do
-            if pCount > 50 then break end -- Giới hạn số lượng quét
-            
+        -- Lấy vị trí bản thân một lần để tính toán
+        local lpChar = LocalPlayer.Character
+        local lpRoot = lpChar and FindFirstChild(lpChar, "HumanoidRootPart")
+        local lpPos = lpRoot and lpRoot.Position or Vector3.zero
+        
+        -- 1. SCAN PLAYERS
+        local plrs = GetPlayers(Players)
+        for i = 1, #plrs do
+            local p = plrs[i]
             if p ~= LocalPlayer and p.Character then
                 local char = p.Character
-                local root = char:FindFirstChild("HumanoidRootPart")
-                local hum = char:FindFirstChild("Humanoid")
+                local root = FindFirstChild(char, "HumanoidRootPart")
+                local hum = FindFirstChild(char, "Humanoid")
                 
                 if root and hum and hum.Health > 0 then
-                    local isEnemy = IsEnemy(p)
-                    -- Cập nhật ESP
-                    UpdateESP(root, p.Name, isEnemy)
+                    -- Xử lý ESP (Chỉ cập nhật hiển thị, không tạo mới liên tục)
+                    local espBox = FindFirstChild(root, "MobESP")
+                    if not espBox then
+                        CreateESP(char) -- Chỉ tạo nếu chưa có
+                    else
+                        if config.EspEnabled then
+                            espBox.Enabled = true
+                            local txt = FindFirstChild(espBox, "TextLabel")
+                            local frame = FindFirstChild(espBox, "Frame")
+                            local stroke = frame and FindFirstChild(frame, "UIStroke")
+                            
+                            if txt and stroke then
+                                local dist = math.floor((Camera.CFrame.Position - root.Position).Magnitude)
+                                txt.Visible = config.EspName
+                                txt.Text = string.format("%s\n[%dm]", p.Name, dist)
+                                stroke.Enabled = config.EspBox
+                                
+                                local isE = IsEnemy(p)
+                                local col = Color3.fromRGB(0, 255, 255) -- Cyan
+                                if config.EspFFA or isE then
+                                    col = Color3.fromRGB(255, 0, 0) -- Đỏ
+                                end
+                                stroke.Color = col
+                                txt.TextColor3 = (config.EspFFA or isE) and Color3.new(1,1,1) or col
+                            end
+                        else
+                            espBox.Enabled = false
+                        end
+                    end
                     
-                    -- Thêm vào danh sách Aim nếu là địch
-                    if isEnemy or config.EspFFA then
-                        local aimPart = GetAimPart(char)
-                        if aimPart then
+                    -- Thêm vào Cache (Dữ liệu này sẽ được Backstab & Aimbot dùng)
+                    -- Chỉ thêm vào cache nếu là địch hoặc bật FFA
+                    if IsEnemy(p) or config.EspFFA then
+                        local part = GetAimPart(char)
+                        if part then
                             table.insert(tempCache, {
-                                Part = aimPart, 
+                                Type = "Player",
+                                Part = part, 
                                 Char = char, 
                                 Root = root,
-                                Dist = (root.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude
+                                Humanoid = hum,
+                                Dist = (root.Position - lpPos).Magnitude
                             })
                         end
                     end
                 end
             end
-            pCount = pCount + 1
         end
         
-        -- 2. Quét Bot/NPC (Bot Check cải tiến)
-        local bCount = 0
+        -- 2. SCAN BOTS
         local wsChildren = Workspace:GetChildren()
         for i = 1, #wsChildren do
             local obj = wsChildren[i]
-            if bCount > 20 then break end
-            
-            -- Điều kiện nhận diện Bot: Là Model, Có Humanoid, Không phải Player, Không có ForceField (Bất tử)
-            if obj:IsA("Model") and obj ~= LocalPlayer.Character then
-                local hum = obj:FindFirstChild("Humanoid")
-                local root = obj:FindFirstChild("HumanoidRootPart")
+            if IsGameBot(obj) then
+                local root = FindFirstChild(obj, "HumanoidRootPart")
+                local hum = FindFirstChild(obj, "Humanoid")
                 
-                if hum and root and hum.Health > 0 and not Players:GetPlayerFromCharacter(obj) then
-                    if not obj:FindFirstChildOfClass("ForceField") then -- Bỏ qua bot bất tử
-                        local aimPart = GetAimPart(obj)
-                        if aimPart then
-                            table.insert(tempCache, {
-                                Part = aimPart, 
-                                Char = obj, 
-                                Root = root,
-                                Dist = (root.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude
-                            })
-                            bCount = bCount + 1
-                        end
+                if root and hum then
+                    local part = GetAimPart(obj)
+                    if part then
+                        table.insert(tempCache, {
+                            Type = "Bot",
+                            Part = part, 
+                            Char = obj, 
+                            Root = root,
+                            Humanoid = hum,
+                            Dist = (root.Position - lpPos).Magnitude
+                        })
                     end
                 end
             end
         end
 
+        -- Cập nhật Cache toàn cục
         TargetCache = tempCache
         
-        -- Logic Warm-up (Đợi 1.5s khi mới bật Aim)
-        if config.AimEnabled and not config.AimReady then
-            task.wait(1.5)
-            config.AimReady = true
+        -- Warmup Check
+        if config.AimEnabled then
+            if not config.AimReady then
+                task.wait(1.5)
+                config.AimReady = true
+            end
+        else
+            config.AimReady = false
         end
         
-        task.wait(config.ScanRate) -- Nghỉ 0.1s
+        task.wait(config.ScanRate)
     end
 end)
 
+-- Auto Create ESP
+Players.PlayerAdded:Connect(function(p) 
+    p.CharacterAdded:Connect(function(c) 
+        task.wait(1)
+        CreateESP(c) 
+    end) 
+end)
+
 -- ==============================================================================
--- [SECTION 6] AIMBOT ENGINE & RENDERER (RENDERSTEPPED)
+-- [SECTION 6] AIM ENGINE (CONSUMER THREAD 1)
 -- ==============================================================================
+-- Luồng này lấy dữ liệu từ TargetCache để xử lý Aim & Drawing
+
+local function GetBestTarget()
+    local bestData = nil
+    local shortestDist = math.huge
+    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+
+    -- Duyệt qua Cache đã có sẵn (Không quét map lại -> Tối ưu)
+    for i = 1, #TargetCache do
+        local entry = TargetCache[i]
+        local part = entry.Part
+        local char = entry.Char
+        
+        if part and part.Parent then 
+            local pos, onScreen = WorldToViewportPoint(Camera, part.Position)
+            if onScreen then
+                local dist = (Vector2.new(pos.X, pos.Y) - center).Magnitude
+                
+                if dist <= _G.CORE.FOV then
+                    local visible = true
+                    if _G.CORE.WallCheck then
+                        rayParams.FilterDescendantsInstances = {LocalPlayer.Character, char}
+                        local dir = part.Position - Camera.CFrame.Position
+                        local hit = Workspace:Raycast(Camera.CFrame.Position, dir, rayParams)
+                        if hit then visible = false end
+                    end
+                    
+                    if visible and dist < shortestDist then
+                        shortestDist = dist
+                        bestData = entry
+                    end
+                end
+            end
+        end
+    end
+    return bestData
+end
+
 RunService.RenderStepped:Connect(function()
     local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     local conf = _G.CORE
     
-    -- 1. Drawing Safety Check (Tự động khôi phục nếu mất)
-    CheckDrawingObjects()
-    
-    if fovCircle then
-        fovCircle.Visible = conf.AimEnabled
+    -- Visuals Logic
+    if conf.AimEnabled then
+        fovCircle.Visible = true
         fovCircle.Position = center
-        fovCircle.Radius = conf.FOV -- Cố định 110
-    end
-    
-    if deadCircle then
-        deadCircle.Visible = conf.AimEnabled
+        fovCircle.Radius = conf.FOV
+        
+        deadCircle.Visible = true
         deadCircle.Position = center
-        deadCircle.Radius = conf.Deadzone -- Cố định 17
+        deadCircle.Radius = conf.Deadzone
+        
+        if not conf.AimReady then
+            deadCircle.Color = Color3.fromRGB(255, 255, 0) -- Vàng (Chờ)
+        else
+            deadCircle.Color = Color3.fromRGB(0, 255, 0)   -- Xanh Lá (Ready)
+        end
+    else
+        fovCircle.Visible = false
+        deadCircle.Visible = false
+        return
     end
 
-    -- 2. Aimbot Logic
-    conf.TargetLocking = false -- Reset trạng thái khóa
-    
-    if conf.AimEnabled and conf.AimReady then
-        local bestTarget = nil
-        local maxDist = conf.FOV
+    -- Aim Logic
+    if conf.AimReady then
+        local targetData = GetBestTarget()
         
-        for _, data in ipairs(TargetCache) do
-            if data.Part and data.Part.Parent then
-                local pos, onScreen = Camera:WorldToViewportPoint(data.Part.Position)
-                
-                if onScreen then
-                    local screenDist = (Vector2.new(pos.X, pos.Y) - center).Magnitude
-                    if screenDist < maxDist then
-                        -- Wall Check Logic
-                        local visible = true
-                        if conf.WallCheck then
-                            local params = RaycastParams.new()
-                            params.FilterType = Enum.RaycastFilterType.Exclude
-                            params.FilterDescendantsInstances = {LocalPlayer.Character, data.Char}
-                            
-                            local dir = data.Part.Position - Camera.CFrame.Position
-                            local ray = Workspace:Raycast(Camera.CFrame.Position, dir, params)
-                            if ray then visible = false end
-                        end
-                        
-                        if visible then
-                            maxDist = screenDist
-                            bestTarget = data
-                        end
-                    end
-                end
-            end
-        end
-        
-        if bestTarget then
-            conf.TargetLocking = true
+        if targetData then
+            -- Lock Visual
+            deadCircle.Color = Color3.fromRGB(255, 0, 0) -- Đỏ (Lock)
             
-            local velocity = bestTarget.Root.AssemblyLinearVelocity or Vector3.zero
-            local predPos = bestTarget.Part.Position + (velocity * conf.Pred)
-            local screenPos = Camera:WorldToViewportPoint(bestTarget.Part.Position)
+            local aimPart = targetData.Part
+            local root = targetData.Root
+            
+            local velocity = root.AssemblyLinearVelocity or Vector3.zero
+            local predPos = aimPart.Position + (velocity * conf.Pred)
+            
+            local screenPos = WorldToViewportPoint(Camera, aimPart.Position)
             local distToCenter = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
             
-            -- Logic Dual Zone:
             if distToCenter <= conf.Deadzone then
-                -- Trong vòng Deadzone -> Khóa cứng (Hard Lock)
-                Camera.CFrame = CFrame.new(Camera.CFrame.Position, predPos)
+                Camera.CFrame = CFrame.new(Camera.CFrame.Position, predPos) -- Hard Lock
             else
-                -- Trong vòng FOV -> Kéo tâm nhẹ (Assist)
-                Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, predPos), conf.AssistStrength)
+                Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, predPos), conf.AssistStrength) -- Assist
             end
         end
     end
 end)
 
 -- ==============================================================================
--- [SECTION 7] UI INTERFACE (RAYFIELD LIBRARY)
+-- [SECTION 7] BACKSTAB ENGINE (CONSUMER THREAD 2) - REWORKED
+-- ==============================================================================
+-- Sử dụng Heartbeat và lấy dữ liệu từ TargetCache.
+-- Đảm bảo không quét lại map.
+
+local CurrentBS_Target = nil -- Lưu trữ mục tiêu hiện tại
+
+local function GetNearestForBackstab()
+    local bestChar, minDist = nil, math.huge
+    -- Lấy từ Cache có sẵn
+    for i = 1, #TargetCache do
+        local d = TargetCache[i]
+        if d.Dist < minDist then
+            minDist = d.Dist
+            bestChar = d.Char
+        end
+    end
+    return bestChar
+end
+
+RunService.Heartbeat:Connect(function()
+    if not _G.CORE.BackstabEnabled then 
+        CurrentBS_Target = nil
+        return 
+    end
+
+    local myChar = LocalPlayer.Character
+    local myRoot = myChar and FindFirstChild(myChar, "HumanoidRootPart")
+    
+    if not myRoot then return end
+
+    -- 1. VALIDATION (Kiểm tra mục tiêu hiện tại)
+    if CurrentBS_Target then
+        local hum = FindFirstChild(CurrentBS_Target, "Humanoid")
+        local root = FindFirstChild(CurrentBS_Target, "HumanoidRootPart")
+        
+        -- Nếu mục tiêu chết, mất root, hoặc biến mất -> Hủy ngay
+        if not hum or hum.Health <= 0 or not root or not CurrentBS_Target.Parent then
+            CurrentBS_Target = nil 
+        end
+    end
+    
+    -- 2. ACQUISITION (Nếu chưa có mục tiêu, lấy từ Cache)
+    if not CurrentBS_Target then
+        CurrentBS_Target = GetNearestForBackstab()
+    end
+    
+    -- 3. EXECUTION (Thực thi Backstab)
+    if CurrentBS_Target then
+        local tRoot = FindFirstChild(CurrentBS_Target, "HumanoidRootPart")
+        if tRoot then
+            -- Tính toán vị trí: Sau lưng 1.2 studs
+            local backOffset = CFrame.new(0, 0, _G.CORE.BackstabDist)
+            local targetCFrame = tRoot.CFrame * backOffset
+            
+            -- Tính khoảng cách để quyết định cách di chuyển
+            local dist = (myRoot.Position - targetCFrame.Position).Magnitude
+            
+            -- Nếu khoảng cách quá xa (> 50m), teleport hoặc tween nhanh
+            -- Nếu gần, tween mượt để bám dính
+            local speed = _G.CORE.BackstabSpeed
+            local duration = dist / speed
+            
+            -- Giới hạn frame time (tránh chia cho 0 hoặc quá nhanh)
+            if duration < 0.03 then duration = 0.03 end 
+            
+            -- CHỈ TWEEN KHI CẦN THIẾT (Tối ưu FPS)
+            -- Nếu đã đứng đúng chỗ (sai số nhỏ), không tạo tween mới
+            if dist > 0.5 then
+                local tInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out)
+                local tween = TweenService:Create(myRoot, tInfo, {CFrame = targetCFrame})
+                tween:Play()
+            else
+                -- Nếu đã rất gần, dùng CFrame trực tiếp để khóa cứng (Hard Stick)
+                -- Dùng Lerp nhẹ để tránh rung
+                myRoot.CFrame = myRoot.CFrame:Lerp(targetCFrame, 0.5)
+            end
+            
+            -- Anti-Cheat: Fake Velocity
+            myRoot.AssemblyLinearVelocity = tRoot.AssemblyLinearVelocity
+            
+            -- Anti-Cheat: Luôn nhìn vào mục tiêu
+            local lookPos = Vector3.new(tRoot.Position.X, myRoot.Position.Y, tRoot.Position.Z)
+            myRoot.CFrame = CFrame.lookAt(myRoot.Position, lookPos)
+        end
+    end
+end)
+
+-- ==============================================================================
+-- [SECTION 8] UI INTERFACE (RAYFIELD)
 -- ==============================================================================
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 local Window = Rayfield:CreateWindow({
    Name = "Oxen Hub - Mobile Final",
    Icon = 0,
-   LoadingTitle = "Oxen-Hub V36",
-   LoadingSubtitle = "Delta X Complete",
+   LoadingTitle = "Oxen-Hub V40",
+   LoadingSubtitle = "Delta X Ultimate",
    Theme = "Default",
    DisableRayfieldPrompts = false,
-   ConfigurationSaving = { Enabled = true, FileName = "OxenHub_V36_Config" },
+   ConfigurationSaving = { Enabled = true, FileName = "OxenHub_V40_Ult" },
    KeySystem = false,
 })
 
 -- === TAB 1: COMBAT ===
 local CombatTab = Window:CreateTab("Combat", nil)
-CombatTab:CreateSection("Aimbot System")
+CombatTab:CreateSection("Aimbot Logic")
 
--- Toggle chính (Đã bỏ Slider FOV/Deadzone như yêu cầu)
 CombatTab:CreateToggle({
-    Name = "Enable Aimbot (FOV: 110 | Deadzone: 17)",
+    Name = "Enable Aimbot (Blue/Green)",
     CurrentValue = false,
     Flag = "Aim",
-    Callback = function(v) _G.CORE.AimEnabled = v end
+    Callback = function(v) _G.CORE.AimEnabled = v end,
 })
 
 CombatTab:CreateToggle({
-    Name = "Wall Check (Chắn tường)",
+    Name = "Wall Check",
     CurrentValue = true,
     Flag = "WallCheck",
-    Callback = function(v) _G.CORE.WallCheck = v end
+    Callback = function(v) _G.CORE.WallCheck = v end,
 })
 
-CombatTab:CreateSection("Gun Modifications")
+local RecoilSection = CombatTab:CreateSection("Gun Mods")
 
--- No Recoil (Mobile Fix) - Giữ nguyên logic ổn định
 CombatTab:CreateToggle({
-    Name = "No Recoil (Giảm giật)",
+    Name = "No Recoil (Mobile Fix)",
     CurrentValue = false,
+    Flag = "Recoil",
     Callback = function(v) 
         _G.NoRecoil = v 
         if v then
@@ -446,8 +563,6 @@ CombatTab:CreateToggle({
                 local CurRot = Cam.CFrame.Rotation
                 local x, y, z = CurRot:ToOrientation()
                 local lx, ly, lz = LastRot:ToOrientation()
-                
-                -- Nếu góc lệch nhỏ (giật súng) -> Trả về góc cũ
                 if math.deg(x - lx) > 0.5 then
                     Cam.CFrame = CFrame.new(Cam.CFrame.Position) * CFrame.fromOrientation(lx, y, z)
                     LastRot = CFrame.fromOrientation(lx, y, z)
@@ -466,108 +581,55 @@ local VisualsTab = Window:CreateTab("Visuals", nil)
 VisualsTab:CreateSection("ESP Settings")
 
 VisualsTab:CreateToggle({
-    Name = "Bật ESP (Master Switch)",
+    Name = "Bật ESP (Master)",
     CurrentValue = true,
+    Flag = "ESP",
     Callback = function(v) 
         _G.CORE.EspEnabled = v
         _G.CORE.EspBox = v
         _G.CORE.EspName = v
-    end
+    end,
 })
 
 VisualsTab:CreateToggle({
     Name = "Show Boxes",
     CurrentValue = true,
-    Callback = function(v) _G.CORE.EspBox = v end
+    Callback = function(v) _G.CORE.EspBox = v end,
 })
 
 VisualsTab:CreateToggle({
     Name = "Show Names",
     CurrentValue = true,
-    Callback = function(v) _G.CORE.EspName = v end
+    Callback = function(v) _G.CORE.EspName = v end,
 })
 
 VisualsTab:CreateToggle({
     Name = "FFA Mode (Hiện tất cả)",
     CurrentValue = false,
-    Callback = function(v) _G.CORE.EspFFA = v end
+    Flag = "FFAMode",
+    Callback = function(v) _G.CORE.EspFFA = v end,
 })
 
 -- === TAB 3: MOVEMENT ===
 local MoveTab = Window:CreateTab("Movement", nil)
 
--- [FEATURE] BACKSTAB LOGIC V2 (TWEENING)
-local CurrentBackstabTarget = nil
-
-local function GetNearestBackstabTarget()
-    local nearest, minDist = nil, math.huge
-    for _, data in ipairs(TargetCache) do
-        if data.Dist < minDist then 
-            minDist = data.Dist
-            nearest = data.Char 
-        end
-    end
-    return nearest
-end
-
-task.spawn(function()
-    while true do
-        if _G.CORE.BackstabEnabled and LocalPlayer.Character then
-            local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if myRoot then
-                -- Tìm mục tiêu mới nếu mục tiêu cũ chết/mất
-                if not CurrentBackstabTarget or 
-                   not CurrentBackstabTarget:FindFirstChild("Humanoid") or 
-                   CurrentBackstabTarget.Humanoid.Health <= 0 then
-                    CurrentBackstabTarget = GetNearestBackstabTarget()
-                end
-                
-                if CurrentBackstabTarget then
-                    local tRoot = CurrentBackstabTarget:FindFirstChild("HumanoidRootPart")
-                    if tRoot then
-                        -- Tính vị trí sau lưng (Offset)
-                        local offset = tRoot.CFrame * CFrame.new(0, 0, _G.CORE.BackstabDist)
-                        local dist = (myRoot.Position - offset.Position).Magnitude
-                        
-                        -- Tweening Movement (Bay mượt)
-                        local speed = math.max(_G.CORE.BackstabSpeed, 1)
-                        local time = math.max(dist / speed, 0.05)
-                        
-                        local tInfo = TweenInfo.new(time, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
-                        local tween = TweenService:Create(myRoot, tInfo, {CFrame = offset})
-                        tween:Play()
-                        
-                        -- Anti-Cheat Bypass: Fake Velocity & LookAt
-                        myRoot.AssemblyLinearVelocity = tRoot.AssemblyLinearVelocity
-                        -- Quay mặt về phía lưng địch
-                        local lookPos = Vector3.new(tRoot.Position.X, myRoot.Position.Y, tRoot.Position.Z)
-                        myRoot.CFrame = CFrame.lookAt(myRoot.Position, lookPos)
-                    end
-                end
-            end
-        end
-        task.wait(0.1)
-    end
-end)
-
-MoveTab:CreateSection("Backstab (Áp sát)")
+MoveTab:CreateSection("Backstab System (Sticky)")
 MoveTab:CreateToggle({
-    Name = "Silent Backstab (Tween)",
+    Name = "Silent Backstab (Continuous)",
     CurrentValue = false,
     Callback = function(v) 
-        _G.CORE.BackstabEnabled = v
-        if not v then CurrentBackstabTarget = nil end
+        _G.CORE.BackstabEnabled = v 
+        if not v then CurrentBS_Target = nil end
     end
 })
 MoveTab:CreateSlider({
-    Name = "Tween Speed (Tốc độ bay)",
+    Name = "Tween Speed",
     Range = {20, 200}, Increment = 5, CurrentValue = 50,
     Callback = function(v) _G.CORE.BackstabSpeed = v end
 })
+MoveTab:CreateLabel("Uses Shared Cache (No FPS Drop)")
 
 MoveTab:CreateSection("Character Mods")
-
--- Walkspeed Loop (Đảm bảo không bị game reset)
 MoveTab:CreateSlider({
    Name = "Walkspeed",
    Range = {16, 150}, Increment = 1, CurrentValue = 25,
@@ -583,9 +645,8 @@ MoveTab:CreateSlider({
    end,
 })
 
--- Infinite Jump
 MoveTab:CreateToggle({
-   Name = "Infinite Jump (Nhảy vô hạn)",
+   Name = "Infinite Jump",
    CurrentValue = false,
    Callback = function(v) 
        _G.InfJump = v
@@ -599,7 +660,7 @@ MoveTab:CreateToggle({
    end,
 })
 
--- SMOOTH FLY SYSTEM (MOBILE UI)
+-- SMOOTH FLY UI
 local FlySettings = {Enabled = false, Speed = 1.5, Smoothness = 0.2, GoingUp = false, GoingDown = false, CurrentVelocity = Vector3.new(0,0,0)}
 local MobileFlyUI = nil
 
@@ -608,67 +669,47 @@ local function ToggleMobileFlyUI(bool)
         if MobileFlyUI then MobileFlyUI:Destroy() end
         local ScreenGui = Instance.new("ScreenGui", CoreGui)
         ScreenGui.Name = "OxenFlyUI"
-        
-        -- Nút Bay Lên (UP)
-        local BtnUp = Instance.new("TextButton", ScreenGui)
-        BtnUp.Size = UDim2.new(0, 50, 0, 50)
-        BtnUp.Position = UDim2.new(0, 50, 0.40, 0) -- Vị trí bên trái màn hình
-        BtnUp.Text = "UP"
-        BtnUp.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
-        BtnUp.BackgroundTransparency = 0.5
-        Instance.new("UICorner", BtnUp).CornerRadius = UDim.new(1,0)
-        
-        -- Nút Bay Xuống (DN)
-        local BtnDown = Instance.new("TextButton", ScreenGui)
-        BtnDown.Size = UDim2.new(0, 50, 0, 50)
-        BtnDown.Position = UDim2.new(0, 50, 0.40, 60)
-        BtnDown.Text = "DN"
-        BtnDown.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
-        BtnDown.BackgroundTransparency = 0.5
-        Instance.new("UICorner", BtnDown).CornerRadius = UDim.new(1,0)
 
-        -- Events Touch
-        BtnUp.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseButton1 then FlySettings.GoingUp = true end end)
-        BtnUp.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseButton1 then FlySettings.GoingUp = false end end)
-        BtnDown.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseButton1 then FlySettings.GoingDown = true end end)
-        BtnDown.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseButton1 then FlySettings.GoingDown = false end end)
-        
+        local BtnUp = Instance.new("TextButton", ScreenGui)
+        BtnUp.Size = UDim2.new(0, 50, 0, 50); BtnUp.Position = UDim2.new(0, 10, 0.40, 0) 
+        BtnUp.BackgroundColor3 = Color3.fromRGB(0, 200, 0); BtnUp.BackgroundTransparency = 0.4
+        BtnUp.Text = "UP"; Instance.new("UICorner", BtnUp).CornerRadius = UDim.new(1, 0)
+
+        local BtnDown = Instance.new("TextButton", ScreenGui)
+        BtnDown.Size = UDim2.new(0, 50, 0, 50); BtnDown.Position = UDim2.new(0, 10, 0.40, 60) 
+        BtnDown.BackgroundColor3 = Color3.fromRGB(200, 0, 0); BtnDown.BackgroundTransparency = 0.4
+        BtnDown.Text = "DN"; Instance.new("UICorner", BtnDown).CornerRadius = UDim.new(1, 0)
+
+        BtnUp.InputBegan:Connect(function(i) if i.UserInputType.Name:match("Touch") then FlySettings.GoingUp = true end end)
+        BtnUp.InputEnded:Connect(function(i) if i.UserInputType.Name:match("Touch") then FlySettings.GoingUp = false end end)
+        BtnDown.InputBegan:Connect(function(i) if i.UserInputType.Name:match("Touch") then FlySettings.GoingDown = true end end)
+        BtnDown.InputEnded:Connect(function(i) if i.UserInputType.Name:match("Touch") then FlySettings.GoingDown = false end end)
         MobileFlyUI = ScreenGui
     else
         if MobileFlyUI then MobileFlyUI:Destroy() end
-        MobileFlyUI = nil
-        FlySettings.GoingUp = false
-        FlySettings.GoingDown = false
+        MobileFlyUI = nil; FlySettings.GoingUp = false; FlySettings.GoingDown = false
         FlySettings.CurrentVelocity = Vector3.new(0,0,0)
     end
 end
-
--- Fly Logic & Noclip
 local NoclipConn = nil
 RunService.RenderStepped:Connect(function()
-    if not FlySettings.Enabled or not LocalPlayer.Character then return end
-    local root = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    local hum = LocalPlayer.Character:FindFirstChild("Humanoid")
+    if not FlySettings.Enabled then return end
+    local char = LocalPlayer.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChild("Humanoid")
     if not root or not hum then return end
     
-    -- Tính toán hướng bay
     root.Velocity = Vector3.zero
-    local tDir = Vector3.zero
+    local moveDir = hum.MoveDirection
+    local targetDir = Vector3.new(moveDir.X, 0, moveDir.Z) * FlySettings.Speed
+    if FlySettings.GoingUp then targetDir = targetDir + Vector3.new(0, FlySettings.Speed, 0)
+    elseif FlySettings.GoingDown then targetDir = targetDir + Vector3.new(0, -FlySettings.Speed, 0) end
     
-    if FlySettings.GoingUp then 
-        tDir = Vector3.new(0, FlySettings.Speed, 0) 
-    elseif FlySettings.GoingDown then 
-        tDir = Vector3.new(0, -FlySettings.Speed, 0) 
-    else 
-        -- Bay theo hướng nhìn của Camera/MoveDirection
-        tDir = (hum.MoveDirection * Vector3.new(1,0,1)) * FlySettings.Speed 
-    end
-    
-    -- Lerp để bay mượt
-    FlySettings.CurrentVelocity = FlySettings.CurrentVelocity:Lerp(tDir, FlySettings.Smoothness)
-    root.CFrame = root.CFrame + FlySettings.CurrentVelocity
-    
-    hum.PlatformStand = true -- Tránh animation đi bộ
+    FlySettings.CurrentVelocity = FlySettings.CurrentVelocity:Lerp(targetDir, FlySettings.Smoothness)
+    if FlySettings.CurrentVelocity.Magnitude > 0.01 then root.CFrame = root.CFrame + FlySettings.CurrentVelocity
+    else FlySettings.CurrentVelocity = Vector3.zero end
+    hum.PlatformStand = true 
 end)
 
 MoveTab:CreateSection("Fly System")
@@ -677,10 +718,8 @@ MoveTab:CreateToggle({
     CurrentValue = false,
     Callback = function(v)
         FlySettings.Enabled = v
-        ToggleMobileFlyUI(v)
-        
+        ToggleMobileFlyUI(v) 
         if v then
-            -- Bật Noclip khi bay
             if NoclipConn then NoclipConn:Disconnect() end
             NoclipConn = RunService.Stepped:Connect(function()
                 if LocalPlayer.Character then
@@ -690,7 +729,6 @@ MoveTab:CreateToggle({
                 end
             end)
         else
-            -- Tắt Noclip và Reset
             if NoclipConn then NoclipConn:Disconnect() end
             NoclipConn = nil
             if LocalPlayer.Character then
@@ -707,22 +745,19 @@ MoveTab:CreateToggle({
 MoveTab:CreateSlider({Name = "Fly Speed", Range = {0.5, 5}, Increment = 0.1, CurrentValue = 1.5, Callback = function(v) FlySettings.Speed = v end})
 
 -- ==============================================================================
--- [SECTION 8] GARBAGE COLLECTOR (DỌN DẸP & SỬA LỖI)
+-- [SECTION 9] GARBAGE COLLECTOR
 -- ==============================================================================
 task.spawn(function()
     while true do
-        -- Vòng lặp này chạy chậm (3s/lần) để check lỗi
         for _, p in ipairs(Players:GetPlayers()) do
             if p ~= LocalPlayer and p.Character then
                 local root = p.Character:FindFirstChild("HumanoidRootPart")
-                -- Nếu Scanner lỡ bỏ sót ESP -> Tạo lại
-                if root then 
-                    UpdateESP(root, p.Name, IsEnemy(p)) 
-                end
+                -- Fail-safe: Nếu Scanner bỏ sót ESP thì tạo lại
+                if root and not root:FindFirstChild("MobESP") then CreateESP(p.Character) end
             end
         end
-        task.wait(3)
+        task.wait(3) 
     end
 end)
 
-Rayfield:Notify({Title = "Oxen Hub Complete", Content = "V36: Colors Updated!", Duration = 5})
+Rayfield:Notify({Title = "Oxen Hub ", Content = "KIMOCHI YAMATE", Duration = 5})
