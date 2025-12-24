@@ -899,108 +899,89 @@ local JumpConn = Services.UserInputService.JumpRequest:Connect(function()
 end)
 table.insert(_G.OxenConnections, JumpConn)
 
---[[
-    GOD MODE MODULE (V56 ULTIMATE)
-    Logic: Invisible Shield (4 Walls)
-    Optimization: Integrated into Scanner Loop + Auto Recreate on Death
-]]
+local GodWalls = {}
 
-local GodWalls = {} -- Bảng quản lý các bức tường
+-- Hàm dọn dẹp tường cũ
+local function CleanGodWalls(char)
+    if char then
+        for _, child in pairs(char:GetChildren()) do
+            if child.Name == "OxenShieldWall" then
+                child:Destroy()
+            end
+        end
+    end
+    table.clear(GodWalls)
+end
 
--- Hàm kiểm tra và tạo khiên cho nhân vật
+-- Hàm tạo khiên khoảng cách cân bằng (0.7m)
 local function CreateShieldForChar(char)
     if not char then return end
     local root = char:FindFirstChild("HumanoidRootPart")
-    
-    -- Nếu chưa có RootPart (đang load), bỏ qua để tránh lỗi
     if not root then return end
     
-    -- [CHECK 1] Kiểm tra xem đã có tường chưa
-    -- Nếu đã có 1 tường con tên "OxenGodWall", coi như đã có khiên -> Thoát ngay (Siêu nhẹ)
-    if char:FindFirstChild("OxenGodWall") then return end
+    -- Kiểm tra nếu đã có khiên thì không tạo lại (Tối ưu Scanner)
+    if char:FindFirstChild("OxenShieldWall") then return end
     
-    -- [CHECK 2] Dọn dẹp rác (nếu có)
-    table.clear(GodWalls) 
+    CleanGodWalls(char) 
     
-    -- Thông số kỹ thuật lá chắn
-    local size = Vector3.new(6, 8, 1) -- Rộng 6, Cao 8, Dày 1
-    local distance = 2.5 -- Khoảng cách từ tâm người
-    local transparency = 1 -- 1 = Vô hình (Chỉnh 0.5 để test nhìn thấy)
+    -- Kích thước tường bao phủ nhân vật
+    local size = Vector3.new(6, 8, 0.2) 
+    local dist = 0.7 -- [YÊU CẦU]: Khoảng cách 0.7m (Cân bằng & Ổn định)
     
-    -- Tạo 4 bức tường (Trước, Sau, Trái, Phải)
-    local offsets = {
-        Vector3.new(0, 0, -distance), -- Trước
-        Vector3.new(0, 0, distance),  -- Sau
-        Vector3.new(-distance, 0, 0), -- Trái
-        Vector3.new(distance, 0, 0)   -- Phải
+    local positions = {
+        CFrame.new(0, 0, -dist), -- Trước
+        CFrame.new(0, 0, dist),  -- Sau
+        CFrame.new(-dist, 0, 0) * CFrame.Angles(0, math.rad(90), 0), -- Trái
+        CFrame.new(dist, 0, 0) * CFrame.Angles(0, math.rad(90), 0)   -- Phải
     }
     
-    for i, offset in ipairs(offsets) do
+    for i, offset in ipairs(positions) do
         local wall = Instance.new("Part")
-        wall.Name = "OxenGodWall" -- Tên định danh để kiểm tra
+        wall.Name = "OxenShieldWall"
         wall.Size = size
-        wall.Transparency = transparency
-        wall.CanCollide = true -- [QUAN TRỌNG] Chặn đạn vật lý và người chơi khác
-        wall.Anchored = false -- Không neo để di chuyển theo người
-        wall.Massless = true -- Không có khối lượng -> Không làm nặng nhân vật
+        wall.Transparency = 1 -- Vô hình hoàn toàn
+        wall.CanCollide = true
+        wall.Massless = true -- Không trọng lượng để không gây nặng nề khi Speed Hack
         wall.CastShadow = false
         wall.Material = Enum.Material.ForceField
+        wall.Parent = char -- Parent vào char để Aim bỏ qua (Method 2)
         
-        -- [QUAN TRỌNG] Parent vào Character
-        -- Lợi ích 1: Tường sẽ bị xóa tự động khi nhân vật chết -> Không cần code dọn rác phức tạp
-        -- Lợi ích 2: Aimbot (V41/V55) đang Ignore {LocalPlayer.Character} -> Tường này cũng bị Ignore -> Aim xuyên qua được
-        wall.Parent = char
-        table.insert(GodWalls, wall)
-        
-        -- Hàn chặt tường vào RootPart (Thay vì dùng Loop CFrame gây lag)
+        -- Weld vào người (Dùng Constraint để mượt mà trên Mobile)
         local weld = Instance.new("WeldConstraint")
         weld.Part0 = root
         weld.Part1 = wall
         weld.Parent = wall
+        wall.CFrame = root.CFrame * offset
         
-        -- Định vị vị trí tường xung quanh
-        if i <= 2 then
-            wall.CFrame = root.CFrame * CFrame.new(offset)
-        else
-            -- Xoay 90 độ cho tường trái/phải
-            wall.CFrame = root.CFrame * CFrame.new(offset) * CFrame.Angles(0, math.rad(90), 0)
+        -- [ANTI-FLING LOGIC]
+        -- Đảm bảo tường không va chạm với chính cơ thể bạn để tránh văng khỏi map
+        local characterParts = char:GetDescendants()
+        for _, part in pairs(characterParts) do
+            if part:IsA("BasePart") then
+                local noCol = Instance.new("NoCollisionConstraint")
+                noCol.Part0 = wall
+                noCol.Part1 = part
+                noCol.Parent = wall
+            end
         end
+        
+        table.insert(GodWalls, wall)
     end
 end
 
--- Hàm cập nhật GodMode (Được gọi liên tục bởi Scanner 20 lần/giây)
--- Logic: Chỉ tốn CPU khi nhân vật vừa hồi sinh (mất khiên). Bình thường tốn 0% CPU.
-local function UpdateGodMode()
-    -- Kiểm tra Setting
+-- Tích hợp vào Scanner Loop (Section 7)
+-- Scanner sẽ gọi hàm này 20 lần/giây để kiểm tra khiên
+_G.OxenUpdateGodMode = function()
     if _G.OXEN_SETTINGS.GODMODE and _G.OXEN_SETTINGS.GODMODE.Enabled then
         if LocalPlayer.Character then
             CreateShieldForChar(LocalPlayer.Character)
         end
     else
-        -- Logic tắt God Mode: Tìm và xóa nếu đang tồn tại
+        -- Nếu tắt GodMode thì dọn sạch rác vật lý
         if LocalPlayer.Character then
-            -- Dùng vòng lặp ngược để xóa an toàn
-            local children = LocalPlayer.Character:GetChildren()
-            for i = #children, 1, -1 do
-                if children[i].Name == "OxenGodWall" then
-                    children[i]:Destroy()
-                end
-            end
+            CleanGodWalls(LocalPlayer.Character)
         end
-        table.clear(GodWalls)
     end
-end
-
--- Logic Toggle cho UI (Đơn giản hóa)
-local function ToggleGodModeSwitch(state)
-    -- Tự khởi tạo config nếu thiếu
-    if not _G.OXEN_SETTINGS.GODMODE then 
-        _G.OXEN_SETTINGS.GODMODE = { Enabled = false } 
-    end
-    _G.OXEN_SETTINGS.GODMODE.Enabled = state
-    
-    -- Gọi 1 lần ngay lập tức để phản hồi tức thì khi bấm nút
-    UpdateGodMode()
 end
 
 -- [PHẦN 9.7] HITBOX EXPANDER LOGIC (ENHANCED & FIXED)
