@@ -880,6 +880,7 @@ table.insert(_G.OxenConnections, JumpConn)
 
 
 -- [PHẦN 9.6] HITBOX EXPANDER LOGIC (ENHANCED & FIXED)
+-- Logic dựa trên bt(1).lua nhưng tối ưu hóa cho Mobile và sửa lỗi mất hitbox khi đứng gần.
 
 _G.OxenUpdateHBE = function()
     -- Nếu tắt HBE -> Reset toàn bộ về mặc định
@@ -893,7 +894,7 @@ _G.OxenUpdateHBE = function()
                     root.Transparency = 1
                     root.CanCollide = true
                     root.Material = Enum.Material.Plastic
-                    root.Color = Color3.new(1,1,1) -- Reset màu (tùy chọn, thường là reset về màu gốc của part nếu có)
+                    root.Color = Color3.new(1,1,1) -- Reset màu (tùy chọn)
                 end
             end
         end
@@ -916,19 +917,16 @@ _G.OxenUpdateHBE = function()
                 
                 -- Chỉ áp dụng nếu còn sống
                 if root and hum and hum.Health > 0 then
-                    -- [YÊU CẦU: HITBOX GẤP 4 & MÀU XANH NGỌC]
-                    -- Lấy size từ Slider và nhân 4 (theo yêu cầu mới)
+                    -- [YÊU CẦU: HITBOX GẤP 3]
+                    -- Lấy size từ Slider và nhân 3 (hoặc bạn có thể chỉnh Slider lên 45, ở đây tôi nhân 3 theo yêu cầu code)
                     local baseSize = _G.OXEN_SETTINGS.HBE.Size
-                    local targetSize = Vector3.new(baseSize * 4, baseSize * 4, baseSize * 4) -- Nhân 4 kích thước
+                    local targetSize = Vector3.new(baseSize, baseSize, baseSize) -- Nếu muốn gấp 3 thì: baseSize * 3
                     
                     -- Kiểm tra để tránh set liên tục (giảm lag)
                     if root.Size ~= targetSize then
                         root.Size = targetSize
                         root.Transparency = _G.OXEN_SETTINGS.HBE.Transparency
-                        -- Đổi màu sang Xanh Ngọc (Cyan)
-                        -- Color3.fromRGB(0, 255, 255) là màu Cyan chuẩn
-                        -- Hoặc Color3.fromRGB(64, 224, 208) là Turquoise
-                        root.Color = Color3.fromRGB(0, 255, 255) 
+                        root.Color = _G.OXEN_SETTINGS.HBE.Color
                         root.Material = _G.OXEN_SETTINGS.HBE.Material
                         root.CanCollide = false -- Quan trọng: Tắt va chạm để không bị đẩy
                     end
