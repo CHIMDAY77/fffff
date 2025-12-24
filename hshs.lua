@@ -603,158 +603,132 @@ table.insert(_G.OxenConnections, AimConn)
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -- // [PHẦN 9] MOVEMENT & UTILITY (FLY / RECOIL / BACKSTAB)
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--- 9.1. Mobile Fly (LookVector Logic with Mobile UI)
+-- 9.1. Mobile Fly (Fix UI Logic)
 local FlyConn = nil
-local FlyUI = nil -- Biến lưu UI bay cho mobile
+local FlyUI = nil
+local NoclipLoop = nil
 
 local function ToggleFly(state)
     if state then
-        -- Tạo UI điều khiển bay cho Mobile
+        -- 1. Tạo UI (Nếu chưa có)
         if not FlyUI then
             local ScreenGui = Instance.new("ScreenGui")
             ScreenGui.Name = "OxenFlyUI"
-            ScreenGui.Parent = Services.CoreGui -- Sử dụng CoreGui để không bị reset khi chết (nếu executor hỗ trợ)
-
+            -- Kiểm tra CoreGui (Executor support)
+            if gethui then
+                ScreenGui.Parent = gethui()
+            elseif game:GetService("CoreGui") then
+                ScreenGui.Parent = game:GetService("CoreGui")
+            else
+                ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+            end
+            
             local Frame = Instance.new("Frame")
             Frame.Name = "FlyControls"
-            Frame.Size = UDim2.new(0, 120, 0, 100) -- Kích thước khung điều khiển
-            Frame.Position = UDim2.new(0.85, 0, 0.6, 0) -- Vị trí bên phải màn hình
+            Frame.Size = UDim2.new(0, 100, 0, 120)
+            Frame.Position = UDim2.new(0.05, 0, 0.4, 0) -- Vị trí bên trái
             Frame.BackgroundTransparency = 1
             Frame.Parent = ScreenGui
 
-            local UpBtn = Instance.new("TextButton")
-            UpBtn.Name = "UpButton"
-            UpBtn.Size = UDim2.new(1, 0, 0.45, 0)
-            UpBtn.Position = UDim2.new(0, 0, 0, 0)
-            UpBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-            UpBtn.BackgroundTransparency = 0.5
-            UpBtn.Text = "FLY UP"
-            UpBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-            UpBtn.TextScaled = true
-            UpBtn.Font = Enum.Font.GothamBold
-            UpBtn.Parent = Frame
-            
-            -- Bo tròn góc nút Up
-            local UpCorner = Instance.new("UICorner")
-            UpCorner.CornerRadius = UDim.new(0, 8)
-            UpCorner.Parent = UpBtn
+            -- Helper function tạo nút
+            local function CreateBtn(name, text, pos, varName)
+                local btn = Instance.new("TextButton")
+                btn.Name = name
+                btn.Size = UDim2.new(1, 0, 0.45, 0)
+                btn.Position = pos
+                btn.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+                btn.BackgroundTransparency = 0.3
+                btn.Text = text
+                btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+                btn.TextScaled = true
+                btn.Font = Enum.Font.GothamBold
+                btn.Parent = Frame
+                Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
+                
+                -- Logic giữ nút
+                btn.InputBegan:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                        _G[varName] = true
+                    end
+                end)
+                btn.InputEnded:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                        _G[varName] = false
+                    end
+                end)
+            end
 
-            local DownBtn = Instance.new("TextButton")
-            DownBtn.Name = "DownButton"
-            DownBtn.Size = UDim2.new(1, 0, 0.45, 0)
-            DownBtn.Position = UDim2.new(0, 0, 0.55, 0)
-            DownBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-            DownBtn.BackgroundTransparency = 0.5
-            DownBtn.Text = "FLY DOWN"
-            DownBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-            DownBtn.TextScaled = true
-            DownBtn.Font = Enum.Font.GothamBold
-            DownBtn.Parent = Frame
-
-             -- Bo tròn góc nút Down
-            local DownCorner = Instance.new("UICorner")
-            DownCorner.CornerRadius = UDim.new(0, 8)
-            DownCorner.Parent = DownBtn
+            CreateBtn("UpButton", "UP", UDim2.new(0, 0, 0, 0), "FlyUp")
+            CreateBtn("DownButton", "DOWN", UDim2.new(0, 0, 0.55, 0), "FlyDown")
 
             FlyUI = ScreenGui
         end
         
         -- Hiển thị UI
         if FlyUI then FlyUI.Enabled = true end
+        
+        -- 2. Logic Noclip (Stepped)
+        if NoclipLoop then NoclipLoop:Disconnect() end
+        NoclipLoop = Services.RunService.Stepped:Connect(function()
+            if LocalPlayer.Character then
+                for _, part in pairs(LocalPlayer.Character:GetDescendants()) do
+                    if part:IsA("BasePart") and part.CanCollide then
+                        part.CanCollide = false 
+                    end
+                end
+            end
+        end)
 
+        -- 3. Logic Bay (RenderStepped)
+        if FlyConn then FlyConn:Disconnect() end
         FlyConn = Services.RunService.RenderStepped:Connect(function()
             local char = LocalPlayer.Character
             if not char then return end
-            
-            local hum = char:FindFirstChild("Humanoid")
             local root = char:FindFirstChild("HumanoidRootPart")
+            local hum = char:FindFirstChild("Humanoid")
             
-            if hum and root then
-                hum.PlatformStand = true -- Trạng thái bay
+            if root and hum then
+                hum.PlatformStand = true
                 
                 local camLook = Camera.CFrame.LookVector
                 local moveDir = hum.MoveDirection
-                local flySpeed = _G.OXEN_SETTINGS.MOVEMENT.Fly.Speed
-                
+                local speed = _G.OXEN_SETTINGS.MOVEMENT.Fly.Speed or 60
                 local velocity = Vector3.zero
-
-                -- Xử lý nút UI (Up/Down)
-                if FlyUI then
-                    local upPressed = FlyUI.FlyControls.UpButton.MouseButton1Down -- Kiểm tra trạng thái nhấn (cần logic giữ chuột/chạm)
-                    -- Lưu ý: MouseButton1Down chỉ là sự kiện, cần biến trạng thái.
-                    -- Để đơn giản trên mobile, ta dùng sự kiện InputBegan/InputEnded hoặc check IsMouseButtonPressed không hoạt động tốt với UI button.
-                    -- Cách tốt nhất cho mobile button giữ là dùng biến trạng thái:
-                end
                 
-                -- Logic điều khiển bay
                 if moveDir.Magnitude > 0 then
-                    velocity = camLook * flySpeed
+                    velocity = camLook * speed
                 else
                     velocity = Vector3.zero
                 end
-
-                -- Logic bay lên / xuống bằng UI (Cần tích hợp biến trạng thái bên dưới)
-                if _G.FlyUp then
-                    velocity = velocity + Vector3.new(0, flySpeed, 0)
-                elseif _G.FlyDown then
-                    velocity = velocity + Vector3.new(0, -flySpeed, 0)
-                end
+                
+                if _G.FlyUp then velocity = velocity + Vector3.new(0, speed, 0)
+                elseif _G.FlyDown then velocity = velocity + Vector3.new(0, -speed, 0) end
                 
                 root.Velocity = velocity
-                root.CanCollide = false -- Noclip khi bay
+                root.RotVelocity = Vector3.zero
             end
         end)
         
-        -- Setup sự kiện cho nút (để xử lý giữ nút)
-        if FlyUI then
-            local upBtn = FlyUI.FlyControls.UpButton
-            local downBtn = FlyUI.FlyControls.DownButton
-            
-            -- Xử lý nút UP
-            upBtn.InputBegan:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                    _G.FlyUp = true
-                end
-            end)
-            upBtn.InputEnded:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                    _G.FlyUp = false
-                end
-            end)
-            
-            -- Xử lý nút DOWN
-            downBtn.InputBegan:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                    _G.FlyDown = true
-                end
-            end)
-            downBtn.InputEnded:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                    _G.FlyDown = false
-                end
-            end)
-        end
-
     else
-        -- Tắt bay
-        if FlyConn then FlyConn:Disconnect() end
+        -- Tắt Bay
+        if FlyConn then FlyConn:Disconnect(); FlyConn = nil end
+        if NoclipLoop then NoclipLoop:Disconnect(); NoclipLoop = nil end
         
-        -- Ẩn UI và reset biến trạng thái
-        if FlyUI then 
-            FlyUI.Enabled = false 
-            -- Tùy chọn: Xóa hẳn UI nếu muốn sạch sẽ
-            -- FlyUI:Destroy() 
-            -- FlyUI = nil
-        end
+        -- Ẩn UI ngay lập tức
+        if FlyUI then FlyUI.Enabled = false end
         _G.FlyUp = false
         _G.FlyDown = false
-
+        
+        -- Reset nhân vật
         local char = LocalPlayer.Character
         if char then
             local hum = char:FindFirstChild("Humanoid")
             local root = char:FindFirstChild("HumanoidRootPart")
             if hum then hum.PlatformStand = false end
-            if root then root.Velocity = Vector3.zero end
+            if root then 
+                root.Velocity = Vector3.zero 
+                -- Tùy chọn: Set lại CanCollide nếu cần thiết, nhưng game thường tự fix khi di chuyển
+            end
         end
     end
 end
