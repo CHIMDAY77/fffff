@@ -899,69 +899,92 @@ local JumpConn = Services.UserInputService.JumpRequest:Connect(function()
 end)
 table.insert(_G.OxenConnections, JumpConn)
 
-local GodWalls = {}
+--[[ 
+    GOD MODE V58 (STICKY SHIELD)
+    Logic: WeldConstraint (Bám sát tuyệt đối) + Projectile Eraser
+    Cơ chế: 
+    1. Tường vật lý được HÀN (Weld) vào người -> Không bao giờ bị trễ nhịp.
+    2. Sử dụng NoCollisionConstraint cho TẤT CẢ bộ phận cơ thể -> Chống văng map.
+    3. Projectile Eraser: Xóa đạn bay vào vùng an toàn.
+]]
 
--- Hàm dọn dẹp tường cũ
-local function CleanGodWalls(char)
-    if char then
-        for _, child in pairs(char:GetChildren()) do
-            if child.Name == "OxenShieldWall" then
-                child:Destroy()
-            end
-        end
+local RunService = game:GetService("RunService")
+local PhysicsService = game:GetService("PhysicsService")
+local GodWalls = {}
+local ProjectileLoop = nil
+
+-- Tạo Collision Group an toàn (nếu có thể)
+local ShieldGroup = "OxenShieldGroup"
+local PlayerGroup = "OxenPlayerGroup"
+
+pcall(function()
+    PhysicsService:CreateCollisionGroup(ShieldGroup)
+    PhysicsService:CreateCollisionGroup(PlayerGroup)
+    PhysicsService:CollisionGroupSetCollidable(ShieldGroup, PlayerGroup, false) -- Shield không chạm Player
+    PhysicsService:CollisionGroupSetCollidable(ShieldGroup, "Default", true)   -- Shield chặn mọi thứ khác
+end)
+
+-- Hàm dọn dẹp
+local function CleanGodWalls()
+    for _, wall in pairs(GodWalls) do
+        if wall then wall:Destroy() end
     end
     table.clear(GodWalls)
 end
 
--- Hàm tạo khiên khoảng cách cân bằng (0.7m)
-local function CreateShieldForChar(char)
+-- Hàm tạo khiên vật lý (WELD EDITION)
+local function CreateStickyShield(char)
     if not char then return end
-    local root = char:FindFirstChild("HumanoidRootPart")
+    local root = char:WaitForChild("HumanoidRootPart", 1)
     if not root then return end
     
-    -- Kiểm tra nếu đã có khiên thì không tạo lại (Tối ưu Scanner)
-    if char:FindFirstChild("OxenShieldWall") then return end
+    CleanGodWalls()
     
-    CleanGodWalls(char) 
+    -- Gán Player vào Group an toàn
+    pcall(function()
+        for _, v in pairs(char:GetDescendants()) do
+            if v:IsA("BasePart") then PhysicsService:SetPartCollisionGroup(v, PlayerGroup) end
+        end
+    end)
     
-    -- Kích thước tường bao phủ nhân vật
-    local size = Vector3.new(6, 8, 0.2) 
-    local dist = 0.7 -- [YÊU CẦU]: Khoảng cách 0.7m (Cân bằng & Ổn định)
+    local size = Vector3.new(6, 8, 0.5)
+    local dist = 1.5 -- Khoảng cách 1.5m là an toàn nhất cho Weld (0.7m rất dễ lỗi vật lý)
     
-    local positions = {
+    -- Vị trí tương đối (Relative CFrame)
+    local offsets = {
         CFrame.new(0, 0, -dist), -- Trước
         CFrame.new(0, 0, dist),  -- Sau
         CFrame.new(-dist, 0, 0) * CFrame.Angles(0, math.rad(90), 0), -- Trái
         CFrame.new(dist, 0, 0) * CFrame.Angles(0, math.rad(90), 0)   -- Phải
     }
     
-    for i, offset in ipairs(positions) do
+    for i, offset in ipairs(offsets) do
         local wall = Instance.new("Part")
-        wall.Name = "OxenShieldWall"
+        wall.Name = "OxenShield"
         wall.Size = size
-        wall.Transparency = 1 -- Vô hình hoàn toàn
-        wall.CanCollide = true
-        wall.Massless = true -- Không trọng lượng để không gây nặng nề khi Speed Hack
-        wall.CastShadow = false
+        wall.Transparency = 1 
+        wall.CanCollide = true 
+        wall.Anchored = false   -- [QUAN TRỌNG] Không Neo để Weld hoạt động
+        wall.Massless = true    -- Không trọng lượng
         wall.Material = Enum.Material.ForceField
-        wall.Parent = char -- Parent vào char để Aim bỏ qua (Method 2)
+        wall.Parent = char
         
-        -- Weld vào người (Dùng Constraint để mượt mà trên Mobile)
+        -- Gán vào Group khiên
+        pcall(function() PhysicsService:SetPartCollisionGroup(wall, ShieldGroup) end)
+        
+        -- Định vị và Hàn
+        wall.CFrame = root.CFrame * offset
+        
         local weld = Instance.new("WeldConstraint")
         weld.Part0 = root
         weld.Part1 = wall
         weld.Parent = wall
-        wall.CFrame = root.CFrame * offset
         
-        -- [ANTI-FLING LOGIC]
-        -- Đảm bảo tường không va chạm với chính cơ thể bạn để tránh văng khỏi map
-        local characterParts = char:GetDescendants()
-        for _, part in pairs(characterParts) do
+        -- Fallback: NoCollisionConstraint (Cho Executor yếu)
+        for _, part in pairs(char:GetChildren()) do
             if part:IsA("BasePart") then
-                local noCol = Instance.new("NoCollisionConstraint")
-                noCol.Part0 = wall
-                noCol.Part1 = part
-                noCol.Parent = wall
+                local nc = Instance.new("NoCollisionConstraint")
+                nc.Part0 = wall; nc.Part1 = part; nc.Parent = wall
             end
         end
         
@@ -969,18 +992,65 @@ local function CreateShieldForChar(char)
     end
 end
 
--- Tích hợp vào Scanner Loop (Section 7)
--- Scanner sẽ gọi hàm này 20 lần/giây để kiểm tra khiên
+-- Hàm kích hoạt
+local function StartGodMode()
+    if not LocalPlayer.Character then return end
+    CreateStickyShield(LocalPlayer.Character)
+    
+    -- Loop chỉ để quét đạn (Không cần update vị trí tường nữa vì đã Weld)
+    ProjectileLoop = RunService.RenderStepped:Connect(function()
+        local char = LocalPlayer.Character
+        if not char then return end
+        local root = char:FindFirstChild("HumanoidRootPart")
+        if not root then return end
+        
+        -- Quét đạn xung quanh (Radius 15)
+        local regionParams = OverlapParams.new()
+        regionParams.FilterDescendantsInstances = {char, Camera}
+        regionParams.FilterType = Enum.RaycastFilterType.Exclude
+        
+        local parts = workspace:GetPartBoundsInRadius(root.Position, 15, regionParams)
+        
+        for _, part in ipairs(parts) do
+            -- Logic xóa đạn (Projectile Eraser)
+            local isBullet = false
+            local name = part.Name:lower()
+            
+            if name:find("bullet") or name:find("projectile") or name:find("ray") or name:find("beam") then
+                isBullet = true
+            end
+            
+            if part.Size.Magnitude < 3 and not part.Parent:FindFirstChild("Humanoid") then
+                if part.AssemblyLinearVelocity.Magnitude > 50 then
+                    isBullet = true
+                end
+            end
+            
+            if isBullet then
+                pcall(function() 
+                    part.CanCollide = false 
+                    part.Anchored = true -- Dừng đạn lại
+                    part.Transparency = 1
+                    part:Destroy() 
+                end)
+            end
+        end
+    end)
+end
+
+-- Tích hợp Scanner
 _G.OxenUpdateGodMode = function()
     if _G.OXEN_SETTINGS.GODMODE and _G.OXEN_SETTINGS.GODMODE.Enabled then
-        if LocalPlayer.Character then
-            CreateShieldForChar(LocalPlayer.Character)
+        -- Nếu nhân vật tồn tại mà chưa có tường -> Tạo mới
+        if LocalPlayer.Character and #GodWalls == 0 then
+            StartGodMode()
         end
     else
-        -- Nếu tắt GodMode thì dọn sạch rác vật lý
-        if LocalPlayer.Character then
-            CleanGodWalls(LocalPlayer.Character)
+        if ProjectileLoop then 
+            ProjectileLoop:Disconnect() 
+            ProjectileLoop = nil
         end
+        CleanGodWalls()
     end
 end
 
@@ -1156,14 +1226,28 @@ CombatTab:CreateSlider({
 })
 
 -- Thêm Section God Mode vào cuối Tab Combat
-local GodSection = CombatTab:CreateSection("God Mode (Invisible Shield)")
+local GodSection = CombatTab:CreateSection("God Mode (Shield V58)")
 
 CombatTab:CreateToggle({
     Name = "Enable God Mode",
     CurrentValue = false,
-    Flag = "GodMode",
+    Flag = "GodModeEnabled",
     Callback = function(Value)
-        ToggleGodModeSwitch(Value)
+        -- Khởi tạo config nếu chưa có
+        if not _G.OXEN_SETTINGS.GODMODE then 
+            _G.OXEN_SETTINGS.GODMODE = { Enabled = false } 
+        end
+        
+        _G.OXEN_SETTINGS.GODMODE.Enabled = Value
+        
+        -- Gọi hàm cập nhật ngay lập tức để phản hồi nhanh
+        if _G.OxenUpdateGodMode then 
+            _G.OxenUpdateGodMode() 
+        end
+        
+        -- Thông báo trạng thái (Tùy chọn)
+        local status = Value and "Enabled" or "Disabled"
+        -- warn("[GOD MODE] " .. status)
     end,
 })
 
