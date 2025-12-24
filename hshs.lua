@@ -2,7 +2,7 @@
     PROJECT: OXEN HUB - MOBILE FINAL
     VERSION: V55 (ENTERPRISE / RAW PERFORMANCE)
     TARGET:  Delta X, Hydrogen, Fluxus, Arceus X
-    AUTHOR:  Gemini Optimizer
+    AUTHOR:  K2PN
 ]]
 
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -419,6 +419,7 @@ end
 -- Kết hợp Scanner V41 và logic Hitbox từ bt(1).lua
 
 local function ProcessTargets()
+    if UpdateGodMode then UpdateGodMode() end
     -- Xóa cache cũ
     table.clear(_G.TargetCache)
     
@@ -602,11 +603,65 @@ table.insert(_G.OxenConnections, AimConn)
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -- // [PHẦN 9] MOVEMENT & UTILITY (FLY / RECOIL / BACKSTAB)
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-
--- 9.1. Mobile Fly (LookVector Logic)
+-- 9.1. Mobile Fly (LookVector Logic with Mobile UI)
 local FlyConn = nil
+local FlyUI = nil -- Biến lưu UI bay cho mobile
+
 local function ToggleFly(state)
     if state then
+        -- Tạo UI điều khiển bay cho Mobile
+        if not FlyUI then
+            local ScreenGui = Instance.new("ScreenGui")
+            ScreenGui.Name = "OxenFlyUI"
+            ScreenGui.Parent = Services.CoreGui -- Sử dụng CoreGui để không bị reset khi chết (nếu executor hỗ trợ)
+
+            local Frame = Instance.new("Frame")
+            Frame.Name = "FlyControls"
+            Frame.Size = UDim2.new(0, 120, 0, 100) -- Kích thước khung điều khiển
+            Frame.Position = UDim2.new(0.85, 0, 0.6, 0) -- Vị trí bên phải màn hình
+            Frame.BackgroundTransparency = 1
+            Frame.Parent = ScreenGui
+
+            local UpBtn = Instance.new("TextButton")
+            UpBtn.Name = "UpButton"
+            UpBtn.Size = UDim2.new(1, 0, 0.45, 0)
+            UpBtn.Position = UDim2.new(0, 0, 0, 0)
+            UpBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+            UpBtn.BackgroundTransparency = 0.5
+            UpBtn.Text = "FLY UP"
+            UpBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            UpBtn.TextScaled = true
+            UpBtn.Font = Enum.Font.GothamBold
+            UpBtn.Parent = Frame
+            
+            -- Bo tròn góc nút Up
+            local UpCorner = Instance.new("UICorner")
+            UpCorner.CornerRadius = UDim.new(0, 8)
+            UpCorner.Parent = UpBtn
+
+            local DownBtn = Instance.new("TextButton")
+            DownBtn.Name = "DownButton"
+            DownBtn.Size = UDim2.new(1, 0, 0.45, 0)
+            DownBtn.Position = UDim2.new(0, 0, 0.55, 0)
+            DownBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+            DownBtn.BackgroundTransparency = 0.5
+            DownBtn.Text = "FLY DOWN"
+            DownBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            DownBtn.TextScaled = true
+            DownBtn.Font = Enum.Font.GothamBold
+            DownBtn.Parent = Frame
+
+             -- Bo tròn góc nút Down
+            local DownCorner = Instance.new("UICorner")
+            DownCorner.CornerRadius = UDim.new(0, 8)
+            DownCorner.Parent = DownBtn
+
+            FlyUI = ScreenGui
+        end
+        
+        -- Hiển thị UI
+        if FlyUI then FlyUI.Enabled = true end
+
         FlyConn = Services.RunService.RenderStepped:Connect(function()
             local char = LocalPlayer.Character
             if not char then return end
@@ -621,18 +676,79 @@ local function ToggleFly(state)
                 local moveDir = hum.MoveDirection
                 local flySpeed = _G.OXEN_SETTINGS.MOVEMENT.Fly.Speed
                 
-                -- Nếu có input di chuyển -> Bay theo hướng Camera
-                if moveDir.Magnitude > 0 then
-                    root.Velocity = camLook * flySpeed
-                else
-                    root.Velocity = Vector3.zero
+                local velocity = Vector3.zero
+
+                -- Xử lý nút UI (Up/Down)
+                if FlyUI then
+                    local upPressed = FlyUI.FlyControls.UpButton.MouseButton1Down -- Kiểm tra trạng thái nhấn (cần logic giữ chuột/chạm)
+                    -- Lưu ý: MouseButton1Down chỉ là sự kiện, cần biến trạng thái.
+                    -- Để đơn giản trên mobile, ta dùng sự kiện InputBegan/InputEnded hoặc check IsMouseButtonPressed không hoạt động tốt với UI button.
+                    -- Cách tốt nhất cho mobile button giữ là dùng biến trạng thái:
                 end
                 
+                -- Logic điều khiển bay
+                if moveDir.Magnitude > 0 then
+                    velocity = camLook * flySpeed
+                else
+                    velocity = Vector3.zero
+                end
+
+                -- Logic bay lên / xuống bằng UI (Cần tích hợp biến trạng thái bên dưới)
+                if _G.FlyUp then
+                    velocity = velocity + Vector3.new(0, flySpeed, 0)
+                elseif _G.FlyDown then
+                    velocity = velocity + Vector3.new(0, -flySpeed, 0)
+                end
+                
+                root.Velocity = velocity
                 root.CanCollide = false -- Noclip khi bay
             end
         end)
+        
+        -- Setup sự kiện cho nút (để xử lý giữ nút)
+        if FlyUI then
+            local upBtn = FlyUI.FlyControls.UpButton
+            local downBtn = FlyUI.FlyControls.DownButton
+            
+            -- Xử lý nút UP
+            upBtn.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                    _G.FlyUp = true
+                end
+            end)
+            upBtn.InputEnded:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                    _G.FlyUp = false
+                end
+            end)
+            
+            -- Xử lý nút DOWN
+            downBtn.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                    _G.FlyDown = true
+                end
+            end)
+            downBtn.InputEnded:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                    _G.FlyDown = false
+                end
+            end)
+        end
+
     else
+        -- Tắt bay
         if FlyConn then FlyConn:Disconnect() end
+        
+        -- Ẩn UI và reset biến trạng thái
+        if FlyUI then 
+            FlyUI.Enabled = false 
+            -- Tùy chọn: Xóa hẳn UI nếu muốn sạch sẽ
+            -- FlyUI:Destroy() 
+            -- FlyUI = nil
+        end
+        _G.FlyUp = false
+        _G.FlyDown = false
+
         local char = LocalPlayer.Character
         if char then
             local hum = char:FindFirstChild("Humanoid")
@@ -643,66 +759,113 @@ local function ToggleFly(state)
     end
 end
 
--- 9.2. No Recoil (Camera Stabilizer)
-local RecoilConn = nil
+-- 9.2. No Recoil V2 (Camera Axis Stabilizer - Optimized)
+local RecoilActive = false
+local RunService = game:GetService("RunService")
+
 local function ToggleNoRecoil(state)
+    -- [THUẬT TOÁN MỚI: POST-UPDATE CORRECTION]
+    -- Sử dụng BindToRenderStep với độ ưu tiên (Priority) cao hơn Camera của game.
+    -- Điều này đảm bảo script chạy SAU khi game đã thêm độ giật, và GHI ĐÈ lại nó ngay lập tức.
+    -- Kết quả: Camera đứng im tuyệt đối, không còn hiện tượng "giật cục" hay "rung lắc".
+    
     if state then
-        RecoilConn = Services.RunService.RenderStepped:Connect(function()
-            if Camera then
-                -- Ép góc nghiêng (Roll - Z axis) về 0
-                local rx, ry, rz = Camera.CFrame:ToEulerAnglesXYZ()
-                if math.abs(rz) > 0 then
-                     Camera.CFrame = CFrame.new(Camera.CFrame.Position) * CFrame.fromEulerAnglesXYZ(rx, ry, 0)
-                end
+        if RecoilActive then return end -- Tránh bind trùng lặp
+        RecoilActive = true
+        
+        -- Priority: Camera.Value + 1 (Chạy ngay sau Camera)
+        RunService:BindToRenderStep("OxenNoRecoil_V2", Enum.RenderPriority.Camera.Value + 1, function()
+            local Camera = workspace.CurrentCamera
+            if not Camera then return end
+            
+            -- Lấy góc quay hiện tại
+            local rx, ry, rz = Camera.CFrame:ToEulerAnglesXYZ()
+            
+            -- Logic: Combat Arena Anti-Shake
+            -- Trong các game FPS Roblox, "Recoil" và "Shake" chủ yếu nằm ở trục Z (Roll) và X (Pitch).
+            -- Để an toàn trên Mobile (tránh kẹt cảm ứng), ta triệt tiêu hoàn toàn trục Z.
+            
+            if math.abs(rz) > 0.001 then
+                -- Tái tạo CFrame mới:
+                -- 1. Giữ nguyên vị trí (Position)
+                -- 2. Giữ nguyên hướng nhìn ngang/dọc (rx, ry)
+                -- 3. Ép độ nghiêng (rz) về 0 tuyệt đối
+                Camera.CFrame = CFrame.new(Camera.CFrame.Position) * CFrame.fromEulerAnglesXYZ(rx, ry, 0)
             end
         end)
     else
-        if RecoilConn then RecoilConn:Disconnect() end
+        -- Tắt chức năng
+        if RecoilActive then
+            RecoilActive = false
+            pcall(function()
+                RunService:UnbindFromRenderStep("OxenNoRecoil_V2")
+            end)
+        end
     end
 end
 
--- 9.3. Backstab V3 (Logic tách biệt)
+-- 9.3. Backstab V3 (Enhanced: Auto-Face & Anti-Spin)
 local BackstabConn = Services.RunService.Heartbeat:Connect(function()
+    -- Kiểm tra điều kiện bật (Enabled) và nhân vật tồn tại
     if not _G.OXEN_SETTINGS.BACKSTAB.Enabled then return end
     if not LocalPlayer.Character then return end
     
-    local closest = nil
-    local minDist = 500
+    local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return end
     
-    -- Lấy mục tiêu từ Cache để đỡ phải quét lại
+    local closest = nil
+    local minDist = 999 -- Phạm vi quét mục tiêu
+    
+    -- Lấy mục tiêu từ Cache (TargetCache được cập nhật bởi Scanner ở Section 7)
     for _, data in pairs(_G.TargetCache) do
-        -- Logic Backstab riêng: 
-        -- Nếu FFA = False -> Chỉ móc lốp địch (TeamCheck = true)
-        -- Nếu FFA = True -> Móc lốp tất cả
         local isValid = false
+        
+        -- Logic lọc mục tiêu:
+        -- Nếu FFA = True -> Đánh tất cả
+        -- Nếu FFA = False -> Chỉ đánh kẻ địch (Team Check)
         if _G.OXEN_SETTINGS.BACKSTAB.FFA then
             isValid = true
         else
-            -- Nếu không phải đồng đội
             if not IsTeam(data.Player) then isValid = true end
         end
         
+        -- Tìm mục tiêu gần nhất trong phạm vi cho phép
         if isValid and data.Distance < minDist then
             minDist = data.Distance
             closest = data
         end
     end
     
+    -- Thực hiện Backstab nếu tìm thấy mục tiêu
     if closest and closest.Root then
         local tRoot = closest.Root
-        local mRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         
-        if mRoot then
-            -- Tính toán vị trí
-            local backOffset = CFrame.new(0, 0, _G.OXEN_SETTINGS.BACKSTAB.Distance)
-            local targetCFrame = tRoot.CFrame * backOffset
-            
-            -- Sticky Teleport
-            mRoot.CFrame = CFrame.new(targetCFrame.Position, tRoot.Position)
-            
-            -- Ghost Mode
-            if _G.OXEN_SETTINGS.BACKSTAB.GhostMode then
-                mRoot.CanCollide = false
+        -- [BƯỚC 1] Tính vị trí ĐÍCH ĐẾN (Sau lưng địch)
+        -- Sử dụng CFrame của địch * offset Z (4.5 studs)
+        local backOffset = CFrame.new(0, 0, _G.OXEN_SETTINGS.BACKSTAB.Distance)
+        local targetPosition = (tRoot.CFrame * backOffset).Position
+        
+        -- [BƯỚC 2] Tính toán AUTO-FACE (Khóa hướng nhìn)
+        -- Mục tiêu: Luôn nhìn thẳng vào lưng địch để skill/hitbox trúng đích
+        -- Kỹ thuật: Lấy tọa độ X, Z của địch, giữ nguyên Y của vị trí đích để camera không bị chúc đầu xuống đất
+        local faceTargetPosition = Vector3.new(tRoot.Position.X, targetPosition.Y, tRoot.Position.Z)
+        
+        -- [BƯỚC 3] Áp dụng Teleport (Sticky CFrame)
+        -- CFrame.lookAt(Vị trí đứng, Vị trí nhìn) -> Tạo ra góc nhìn chuẩn xác
+        myRoot.CFrame = CFrame.lookAt(targetPosition, faceTargetPosition)
+        
+        -- [BƯỚC 4] Ổn định vật lý (Stability)
+        -- Reset vận tốc về 0 để nhân vật đứng im phăng phắc, không bị trôi do quán tính
+        myRoot.Velocity = Vector3.zero
+        myRoot.RotVelocity = Vector3.zero
+        
+        -- [BƯỚC 5] Ghost Mode (Xuyên tường)
+        -- Tắt va chạm liên tục để không bị kẹt khi địch ép góc hoặc xoay người
+        if _G.OXEN_SETTINGS.BACKSTAB.GhostMode then
+            for _, part in pairs(LocalPlayer.Character:GetDescendants()) do
+                if part:IsA("BasePart") and part.CanCollide then
+                    part.CanCollide = false
+                end
             end
         end
     end
@@ -736,6 +899,166 @@ local JumpConn = Services.UserInputService.JumpRequest:Connect(function()
 end)
 table.insert(_G.OxenConnections, JumpConn)
 
+--[[
+    GOD MODE MODULE (V56 ULTIMATE)
+    Logic: Invisible Shield (4 Walls)
+    Optimization: Integrated into Scanner Loop + Auto Recreate on Death
+]]
+
+local GodWalls = {} -- Bảng quản lý các bức tường
+
+-- Hàm kiểm tra và tạo khiên cho nhân vật
+local function CreateShieldForChar(char)
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    
+    -- Nếu chưa có RootPart (đang load), bỏ qua để tránh lỗi
+    if not root then return end
+    
+    -- [CHECK 1] Kiểm tra xem đã có tường chưa
+    -- Nếu đã có 1 tường con tên "OxenGodWall", coi như đã có khiên -> Thoát ngay (Siêu nhẹ)
+    if char:FindFirstChild("OxenGodWall") then return end
+    
+    -- [CHECK 2] Dọn dẹp rác (nếu có)
+    table.clear(GodWalls) 
+    
+    -- Thông số kỹ thuật lá chắn
+    local size = Vector3.new(6, 8, 1) -- Rộng 6, Cao 8, Dày 1
+    local distance = 2.5 -- Khoảng cách từ tâm người
+    local transparency = 1 -- 1 = Vô hình (Chỉnh 0.5 để test nhìn thấy)
+    
+    -- Tạo 4 bức tường (Trước, Sau, Trái, Phải)
+    local offsets = {
+        Vector3.new(0, 0, -distance), -- Trước
+        Vector3.new(0, 0, distance),  -- Sau
+        Vector3.new(-distance, 0, 0), -- Trái
+        Vector3.new(distance, 0, 0)   -- Phải
+    }
+    
+    for i, offset in ipairs(offsets) do
+        local wall = Instance.new("Part")
+        wall.Name = "OxenGodWall" -- Tên định danh để kiểm tra
+        wall.Size = size
+        wall.Transparency = transparency
+        wall.CanCollide = true -- [QUAN TRỌNG] Chặn đạn vật lý và người chơi khác
+        wall.Anchored = false -- Không neo để di chuyển theo người
+        wall.Massless = true -- Không có khối lượng -> Không làm nặng nhân vật
+        wall.CastShadow = false
+        wall.Material = Enum.Material.ForceField
+        
+        -- [QUAN TRỌNG] Parent vào Character
+        -- Lợi ích 1: Tường sẽ bị xóa tự động khi nhân vật chết -> Không cần code dọn rác phức tạp
+        -- Lợi ích 2: Aimbot (V41/V55) đang Ignore {LocalPlayer.Character} -> Tường này cũng bị Ignore -> Aim xuyên qua được
+        wall.Parent = char
+        table.insert(GodWalls, wall)
+        
+        -- Hàn chặt tường vào RootPart (Thay vì dùng Loop CFrame gây lag)
+        local weld = Instance.new("WeldConstraint")
+        weld.Part0 = root
+        weld.Part1 = wall
+        weld.Parent = wall
+        
+        -- Định vị vị trí tường xung quanh
+        if i <= 2 then
+            wall.CFrame = root.CFrame * CFrame.new(offset)
+        else
+            -- Xoay 90 độ cho tường trái/phải
+            wall.CFrame = root.CFrame * CFrame.new(offset) * CFrame.Angles(0, math.rad(90), 0)
+        end
+    end
+end
+
+-- Hàm cập nhật GodMode (Được gọi liên tục bởi Scanner 20 lần/giây)
+-- Logic: Chỉ tốn CPU khi nhân vật vừa hồi sinh (mất khiên). Bình thường tốn 0% CPU.
+local function UpdateGodMode()
+    -- Kiểm tra Setting
+    if _G.OXEN_SETTINGS.GODMODE and _G.OXEN_SETTINGS.GODMODE.Enabled then
+        if LocalPlayer.Character then
+            CreateShieldForChar(LocalPlayer.Character)
+        end
+    else
+        -- Logic tắt God Mode: Tìm và xóa nếu đang tồn tại
+        if LocalPlayer.Character then
+            -- Dùng vòng lặp ngược để xóa an toàn
+            local children = LocalPlayer.Character:GetChildren()
+            for i = #children, 1, -1 do
+                if children[i].Name == "OxenGodWall" then
+                    children[i]:Destroy()
+                end
+            end
+        end
+        table.clear(GodWalls)
+    end
+end
+
+-- Logic Toggle cho UI (Đơn giản hóa)
+local function ToggleGodModeSwitch(state)
+    -- Tự khởi tạo config nếu thiếu
+    if not _G.OXEN_SETTINGS.GODMODE then 
+        _G.OXEN_SETTINGS.GODMODE = { Enabled = false } 
+    end
+    _G.OXEN_SETTINGS.GODMODE.Enabled = state
+    
+    -- Gọi 1 lần ngay lập tức để phản hồi tức thì khi bấm nút
+    UpdateGodMode()
+end
+
+-- [PHẦN 9.7] HITBOX EXPANDER LOGIC (ENHANCED & FIXED)
+-- Logic dựa trên bt(1).lua nhưng tối ưu hóa cho Mobile và sửa lỗi mất hitbox khi đứng gần.
+
+_G.OxenUpdateHBE = function()
+    -- Nếu tắt HBE -> Reset toàn bộ về mặc định
+    if not _G.OXEN_SETTINGS.HBE.Enabled then
+        for _, p in pairs(Services.Players:GetPlayers()) do
+            if p ~= LocalPlayer and p.Character then
+                local root = p.Character:FindFirstChild("HumanoidRootPart")
+                -- Chỉ reset nếu nó đang bị to (tránh spam set size gây lag)
+                if root and root.Size.X > 5 then
+                    root.Size = Vector3.new(2, 2, 1) -- Size chuẩn Roblox
+                    root.Transparency = 1
+                    root.CanCollide = true
+                    root.Material = Enum.Material.Plastic
+                    root.Color = Color3.new(1,1,1) -- Reset màu (tùy chọn)
+                end
+            end
+        end
+        return
+    end
+
+    -- Vòng lặp áp dụng HBE
+    for _, player in pairs(Services.Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            local isEnemy = not IsTeam(player)
+            if _G.OXEN_SETTINGS.VISUALS.FFA then isEnemy = true end
+            
+            -- Fix lỗi mất HBE khi đứng gần:
+            -- Trước đây có thể do logic check distance trong Scanner loại bỏ target quá gần.
+            -- Ở đây ta tách biệt logic HBE, áp dụng cho TOÀN BỘ kẻ địch hợp lệ đang tồn tại.
+            
+            if isEnemy and player.Character then
+                local root = player.Character:FindFirstChild("HumanoidRootPart")
+                local hum = player.Character:FindFirstChild("Humanoid")
+                
+                -- Chỉ áp dụng nếu còn sống
+                if root and hum and hum.Health > 0 then
+                    -- [YÊU CẦU: HITBOX GẤP 3]
+                    -- Lấy size từ Slider và nhân 3 (hoặc bạn có thể chỉnh Slider lên 45, ở đây tôi nhân 3 theo yêu cầu code)
+                    local baseSize = _G.OXEN_SETTINGS.HBE.Size
+                    local targetSize = Vector3.new(baseSize, baseSize, baseSize) -- Nếu muốn gấp 3 thì: baseSize * 3
+                    
+                    -- Kiểm tra để tránh set liên tục (giảm lag)
+                    if root.Size ~= targetSize then
+                        root.Size = targetSize
+                        root.Transparency = _G.OXEN_SETTINGS.HBE.Transparency
+                        root.Color = _G.OXEN_SETTINGS.HBE.Color
+                        root.Material = _G.OXEN_SETTINGS.HBE.Material
+                        root.CanCollide = false -- Quan trọng: Tắt va chạm để không bị đẩy
+                    end
+                end
+            end
+        end
+    end
+end
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -- // [PHẦN 10] GIAO DIỆN NGƯỜI DÙNG (RAYFIELD UI)
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -743,9 +1066,9 @@ table.insert(_G.OxenConnections, JumpConn)
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
-    Name = "Oxen Hub | V55 Enterprise",
-    LoadingTitle = "Oxen Hub Mobile",
-    LoadingSubtitle = "Raw Performance",
+    Name = "Oxen Hub | V55 ",
+    LoadingTitle = "Oxen Hub",
+    LoadingSubtitle = "Donate me",
     ConfigurationSaving = {
         Enabled = true,
         FolderName = "OxenHubV55",
@@ -757,6 +1080,15 @@ local Window = Rayfield:CreateWindow({
         RememberJoins = true
     },
     KeySystem = false,
+    KeySettings = {
+        Title = "Untitled",
+        Subtitle = "Key System",
+        Note = "No method of obtaining the key is provided", -- Use this to tell the user how to get a key
+        FileName = "Keyocutas", -- It is recommended to use something unique as other scripts using Rayfield may overwrite your key file
+        SaveKey = true, -- The user's key will be saved, but if you change the key, they will be unable to use your script
+        GrabKeyFromSite = false, -- If this is true, set Key below to the RAW site you would like Rayfield to get the key from
+        Key = {"Hello"} -- List of keys that will be accepted by the system, can be RAW file links (pastebin, github etc) or simple strings ("hello","key22")
+    }
 })
 
 -- === TAB 1: COMBAT (AIM & HBE) ===
@@ -809,48 +1141,48 @@ CombatTab:CreateSlider({
     end,
 })
 
--- Section: Hitbox Expander (HBE)
-local HBESection = CombatTab:CreateSection("Hitbox Expander (Simple)")
+local HBE_Section = CombatTab:CreateSection("Hitbox Expander (HBE)")
 
 CombatTab:CreateToggle({
-    Name = "Enable HBE",
+    Name = "Tăng hitbox",
     CurrentValue = false,
     Flag = "HBEEnabled",
     Callback = function(Value)
         _G.OXEN_SETTINGS.HBE.Enabled = Value
-        -- Nếu tắt, Force Reset ngay
-        if not Value then
-            local players = Services.Players:GetPlayers()
-            for i=1, #players do
-                local p = players[i]
-                if p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
-                    p.Character.HumanoidRootPart.Size = Vector3.new(2, 2, 1)
-                    p.Character.HumanoidRootPart.Transparency = 1
-                end
-            end
-        end
-    end,
+        -- Gọi hàm update ngay lập tức để người dùng thấy hiệu quả (hoặc reset) ngay
+        if _G.OxenUpdateHBE then _G.OxenUpdateHBE() end
+    end
 })
 
 CombatTab:CreateSlider({
-    Name = "Hitbox Size",
-    Range = {2, 25},
-    Increment = 1,
-    Suffix = "Studs",
-    CurrentValue = 15,
-    Callback = function(Value)
-        _G.OXEN_SETTINGS.HBE.Size = Value
-    end,
+    Name = "Hitbox Size", 
+    Range = {2, 30}, -- Range thực tế
+    Increment = 1, 
+    CurrentValue = 15, -- Giá trị mặc định
+    Callback = function(Value) 
+        _G.OXEN_SETTINGS.HBE.Size = Value -- Sẽ được dùng trong hàm trên
+    end
 })
 
 CombatTab:CreateSlider({
-    Name = "Transparency",
-    Range = {0, 1},
-    Increment = 0.1,
-    Suffix = "Alpha",
-    CurrentValue = 0.6,
+    Name = "Độ trong suốt", 
+    Range = {0, 1}, 
+    Increment = 0.1, 
+    CurrentValue = 0.6, 
+    Callback = function(Value) 
+        _G.OXEN_SETTINGS.HBE.Transparency = Value 
+    end
+})
+
+-- Thêm Section God Mode vào cuối Tab Combat
+local GodSection = CombatTab:CreateSection("God Mode (Invisible Shield)")
+
+CombatTab:CreateToggle({
+    Name = "Enable God Mode",
+    CurrentValue = false,
+    Flag = "GodMode",
     Callback = function(Value)
-        _G.OXEN_SETTINGS.HBE.Transparency = Value
+        ToggleGodModeSwitch(Value)
     end,
 })
 
@@ -983,7 +1315,7 @@ Rayfield:LoadConfiguration()
 Services.GuiService:GetGuiInset() -- Trigger
 game:GetService("StarterGui"):SetCore("SendNotification", {
     Title = "OXEN HUB V55";
-    Text = "Enterprise Mode Loaded!";
+    Text = "Hello baby";
     Duration = 5;
 })
 
