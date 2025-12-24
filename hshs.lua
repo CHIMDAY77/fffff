@@ -626,7 +626,11 @@ local function ToggleFly(state)
             local Frame = Instance.new("Frame")
             Frame.Name = "FlyControls"
             Frame.Size = UDim2.new(0, 100, 0, 120)
-            Frame.Position = UDim2.new(0.05, 0, 0.4, 0) -- Vị trí bên trái
+            -- [SỬA VỊ TRÍ]:
+            -- UDim2.new(X_Scale, X_Offset, Y_Scale, Y_Offset)
+            -- 0.05: Cách mép trái 5% màn hình (Rất sát bên trái)
+            -- 0.2: Cách mép trên 20% màn hình (Cao hẳn lên trên, trên cả khu vực giữa)
+            Frame.Position = UDim2.new(0.05, 0, 0.2, 0) 
             Frame.BackgroundTransparency = 1
             Frame.Parent = ScreenGui
 
@@ -873,163 +877,9 @@ local JumpConn = Services.UserInputService.JumpRequest:Connect(function()
 end)
 table.insert(_G.OxenConnections, JumpConn)
 
---[[ 
-    GOD MODE V58 (STICKY SHIELD)
-    Logic: WeldConstraint (Bám sát tuyệt đối) + Projectile Eraser
-    Cơ chế: 
-    1. Tường vật lý được HÀN (Weld) vào người -> Không bao giờ bị trễ nhịp.
-    2. Sử dụng NoCollisionConstraint cho TẤT CẢ bộ phận cơ thể -> Chống văng map.
-    3. Projectile Eraser: Xóa đạn bay vào vùng an toàn.
-]]
 
-local RunService = game:GetService("RunService")
-local PhysicsService = game:GetService("PhysicsService")
-local GodWalls = {}
-local ProjectileLoop = nil
 
--- Tạo Collision Group an toàn (nếu có thể)
-local ShieldGroup = "OxenShieldGroup"
-local PlayerGroup = "OxenPlayerGroup"
-
-pcall(function()
-    PhysicsService:CreateCollisionGroup(ShieldGroup)
-    PhysicsService:CreateCollisionGroup(PlayerGroup)
-    PhysicsService:CollisionGroupSetCollidable(ShieldGroup, PlayerGroup, false) -- Shield không chạm Player
-    PhysicsService:CollisionGroupSetCollidable(ShieldGroup, "Default", true)   -- Shield chặn mọi thứ khác
-end)
-
--- Hàm dọn dẹp
-local function CleanGodWalls()
-    for _, wall in pairs(GodWalls) do
-        if wall then wall:Destroy() end
-    end
-    table.clear(GodWalls)
-end
-
--- Hàm tạo khiên vật lý (WELD EDITION)
-local function CreateStickyShield(char)
-    if not char then return end
-    local root = char:WaitForChild("HumanoidRootPart", 1)
-    if not root then return end
-    
-    CleanGodWalls()
-    
-    -- Gán Player vào Group an toàn
-    pcall(function()
-        for _, v in pairs(char:GetDescendants()) do
-            if v:IsA("BasePart") then PhysicsService:SetPartCollisionGroup(v, PlayerGroup) end
-        end
-    end)
-    
-    local size = Vector3.new(6, 8, 0.5)
-    local dist = 1.5 -- Khoảng cách 1.5m là an toàn nhất cho Weld (0.7m rất dễ lỗi vật lý)
-    
-    -- Vị trí tương đối (Relative CFrame)
-    local offsets = {
-        CFrame.new(0, 0, -dist), -- Trước
-        CFrame.new(0, 0, dist),  -- Sau
-        CFrame.new(-dist, 0, 0) * CFrame.Angles(0, math.rad(90), 0), -- Trái
-        CFrame.new(dist, 0, 0) * CFrame.Angles(0, math.rad(90), 0)   -- Phải
-    }
-    
-    for i, offset in ipairs(offsets) do
-        local wall = Instance.new("Part")
-        wall.Name = "OxenShield"
-        wall.Size = size
-        wall.Transparency = 1 
-        wall.CanCollide = true 
-        wall.Anchored = false   -- [QUAN TRỌNG] Không Neo để Weld hoạt động
-        wall.Massless = true    -- Không trọng lượng
-        wall.Material = Enum.Material.ForceField
-        wall.Parent = char
-        
-        -- Gán vào Group khiên
-        pcall(function() PhysicsService:SetPartCollisionGroup(wall, ShieldGroup) end)
-        
-        -- Định vị và Hàn
-        wall.CFrame = root.CFrame * offset
-        
-        local weld = Instance.new("WeldConstraint")
-        weld.Part0 = root
-        weld.Part1 = wall
-        weld.Parent = wall
-        
-        -- Fallback: NoCollisionConstraint (Cho Executor yếu)
-        for _, part in pairs(char:GetChildren()) do
-            if part:IsA("BasePart") then
-                local nc = Instance.new("NoCollisionConstraint")
-                nc.Part0 = wall; nc.Part1 = part; nc.Parent = wall
-            end
-        end
-        
-        table.insert(GodWalls, wall)
-    end
-end
-
--- Hàm kích hoạt
-local function StartGodMode()
-    if not LocalPlayer.Character then return end
-    CreateStickyShield(LocalPlayer.Character)
-    
-    -- Loop chỉ để quét đạn (Không cần update vị trí tường nữa vì đã Weld)
-    ProjectileLoop = RunService.RenderStepped:Connect(function()
-        local char = LocalPlayer.Character
-        if not char then return end
-        local root = char:FindFirstChild("HumanoidRootPart")
-        if not root then return end
-        
-        -- Quét đạn xung quanh (Radius 15)
-        local regionParams = OverlapParams.new()
-        regionParams.FilterDescendantsInstances = {char, Camera}
-        regionParams.FilterType = Enum.RaycastFilterType.Exclude
-        
-        local parts = workspace:GetPartBoundsInRadius(root.Position, 15, regionParams)
-        
-        for _, part in ipairs(parts) do
-            -- Logic xóa đạn (Projectile Eraser)
-            local isBullet = false
-            local name = part.Name:lower()
-            
-            if name:find("bullet") or name:find("projectile") or name:find("ray") or name:find("beam") then
-                isBullet = true
-            end
-            
-            if part.Size.Magnitude < 3 and not part.Parent:FindFirstChild("Humanoid") then
-                if part.AssemblyLinearVelocity.Magnitude > 50 then
-                    isBullet = true
-                end
-            end
-            
-            if isBullet then
-                pcall(function() 
-                    part.CanCollide = false 
-                    part.Anchored = true -- Dừng đạn lại
-                    part.Transparency = 1
-                    part:Destroy() 
-                end)
-            end
-        end
-    end)
-end
-
--- Tích hợp Scanner
-_G.OxenUpdateGodMode = function()
-    if _G.OXEN_SETTINGS.GODMODE and _G.OXEN_SETTINGS.GODMODE.Enabled then
-        -- Nếu nhân vật tồn tại mà chưa có tường -> Tạo mới
-        if LocalPlayer.Character and #GodWalls == 0 then
-            StartGodMode()
-        end
-    else
-        if ProjectileLoop then 
-            ProjectileLoop:Disconnect() 
-            ProjectileLoop = nil
-        end
-        CleanGodWalls()
-    end
-end
-
--- [PHẦN 9.7] HITBOX EXPANDER LOGIC (ENHANCED & FIXED)
--- Logic dựa trên bt(1).lua nhưng tối ưu hóa cho Mobile và sửa lỗi mất hitbox khi đứng gần.
+-- [PHẦN 9.6] HITBOX EXPANDER LOGIC (ENHANCED & FIXED)
 
 _G.OxenUpdateHBE = function()
     -- Nếu tắt HBE -> Reset toàn bộ về mặc định
@@ -1043,7 +893,7 @@ _G.OxenUpdateHBE = function()
                     root.Transparency = 1
                     root.CanCollide = true
                     root.Material = Enum.Material.Plastic
-                    root.Color = Color3.new(1,1,1) -- Reset màu (tùy chọn)
+                    root.Color = Color3.new(1,1,1) -- Reset màu (tùy chọn, thường là reset về màu gốc của part nếu có)
                 end
             end
         end
@@ -1066,16 +916,19 @@ _G.OxenUpdateHBE = function()
                 
                 -- Chỉ áp dụng nếu còn sống
                 if root and hum and hum.Health > 0 then
-                    -- [YÊU CẦU: HITBOX GẤP 3]
-                    -- Lấy size từ Slider và nhân 3 (hoặc bạn có thể chỉnh Slider lên 45, ở đây tôi nhân 3 theo yêu cầu code)
+                    -- [YÊU CẦU: HITBOX GẤP 4 & MÀU XANH NGỌC]
+                    -- Lấy size từ Slider và nhân 4 (theo yêu cầu mới)
                     local baseSize = _G.OXEN_SETTINGS.HBE.Size
-                    local targetSize = Vector3.new(baseSize, baseSize, baseSize) -- Nếu muốn gấp 3 thì: baseSize * 3
+                    local targetSize = Vector3.new(baseSize * 4, baseSize * 4, baseSize * 4) -- Nhân 4 kích thước
                     
                     -- Kiểm tra để tránh set liên tục (giảm lag)
                     if root.Size ~= targetSize then
                         root.Size = targetSize
                         root.Transparency = _G.OXEN_SETTINGS.HBE.Transparency
-                        root.Color = _G.OXEN_SETTINGS.HBE.Color
+                        -- Đổi màu sang Xanh Ngọc (Cyan)
+                        -- Color3.fromRGB(0, 255, 255) là màu Cyan chuẩn
+                        -- Hoặc Color3.fromRGB(64, 224, 208) là Turquoise
+                        root.Color = Color3.fromRGB(0, 255, 255) 
                         root.Material = _G.OXEN_SETTINGS.HBE.Material
                         root.CanCollide = false -- Quan trọng: Tắt va chạm để không bị đẩy
                     end
