@@ -1,639 +1,468 @@
---]
+--[[
+    PROJECT: OXEN HUB - ULTIMATE REMASTER
+    BASE: K2PN (Original V55)
+    MODIFIED: AI (Smart Trigger Aimbot + Highlight ESP)
+    TARGET: Mobile (Delta, Fluxus, Hydrogen)
+]]
 
---// SERVICES //--
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local Players = game:GetService("Players")
-local CoreGui = game:GetService("CoreGui")
-local Workspace = game:GetService("Workspace")
-local TweenService = game:GetService("TweenService")
+--------------------------------------------------------------------------------
+-- // [PHẦN 0] KHỞI TẠO & MÔI TRƯỜNG (INIT - GIỮ NGUYÊN BẢN GỐC)
+--------------------------------------------------------------------------------
 
-local LocalPlayer = Players.LocalPlayer
-local Camera = Workspace.CurrentCamera
-local Mouse = LocalPlayer:GetMouse()
+local executor = identifyexecutor and identifyexecutor() or "Unknown"
 
---// CONFIGURATION //--
-local Config = {
-    Prediction = {
-        Enabled = true,
-        MaxSteps = 5,       -- Số lần va chạm tối đa dự đoán
-        MaxLength = 20,     -- Độ dài tối đa của đường dự đoán
-        Thickness = 3,      -- Độ dày đường kẻ
-        Color = Color3.fromRGB(255, 255, 255),
-        BounceColor = Color3.fromRGB(0, 255, 0), -- Màu sau khi va chạm
-        GhostBall = true    -- Hiển thị bóng ma tại điểm va chạm
+if not getgenv().OxenInit then
+    warn("[OXEN BOOT] System Initialized on: " .. executor)
+    getgenv().OxenInit = true
+end
+
+if not getgenv then
+    getgenv = function() return _G end
+end
+
+if getgenv().OxenLoaded then
+    if _G.OxenConnections then
+        for i, conn in pairs(_G.OxenConnections) do
+            if conn then conn:Disconnect() end
+        end
+    end
+    table.clear(_G.OxenConnections)
+end
+
+getgenv().OxenLoaded = true
+getgenv()._G.OxenConnections = {} 
+
+--------------------------------------------------------------------------------
+-- // [PHẦN 1] CẤU HÌNH (SETTINGS)
+--------------------------------------------------------------------------------
+
+getgenv()._G.OXEN_SETTINGS = {
+    CORE = {
+        ScanRate = 0.05,
+        TeamCheck = true,
+        TargetPart = "HumanoidRootPart"
     },
-    UI = {
-        ThemeColor = Color3.fromRGB(45, 45, 45),
-        AccentColor = Color3.fromRGB(0, 120, 215),
-        TextColor = Color3.fromRGB(240, 240, 240),
-        Size = UDim2.fromOffset(200, 250)
+    AIM = {
+        Enabled = false,
+        FOV_Radius = 150,
+        Smoothness = 0.2, -- 0.1 (Rất mượt) -> 1 (Khóa cứng)
+        TriggerBot = true, -- Chỉ aim khi bắn
+        WallCheck = true
     },
-    Physics = {
-        BallRadius = 0.5,   -- Bán kính bi (cần điều chỉnh theo game)
-        Epsilon = 0.05      -- Sai số cho phép
+    HBE = {
+        Enabled = false,
+        Size = 15,
+        Transparency = 0.6,
+        Color = Color3.fromRGB(255, 0, 0)
+    },
+    BACKSTAB = {
+        Enabled = false,
+        Distance = 4.5,
+        GhostMode = true,
+        FFA = false
+    },
+    VISUALS = {
+        ESP_Enabled = true,
+        Highlight = true, -- Dùng công nghệ mới
+        FillColor = Color3.fromRGB(255, 0, 0),
+        OutlineColor = Color3.fromRGB(255, 255, 255)
+    },
+    MOVEMENT = {
+        SpeedEnabled = false,
+        WalkSpeed = 16,
+        JumpEnabled = false,
+        JumpPower = 50,
+        Fly = { Enabled = false, Speed = 60 },
+        NoRecoil = { Enabled = false }
     }
 }
 
-------------------------------------------------------------------------
--- MODULE 1: UTILITIES & MEMORY MANAGEMENT (MAID)
-------------------------------------------------------------------------
-local Maid = {}
-Maid.__index = Maid
+--------------------------------------------------------------------------------
+-- // [PHẦN 2] DỊCH VỤ (SERVICES)
+--------------------------------------------------------------------------------
 
-function Maid.new()
-    return setmetatable({_tasks = {}}, Maid)
-end
+local Services = {
+    Players = game:GetService("Players"),
+    Workspace = game:GetService("Workspace"),
+    RunService = game:GetService("RunService"),
+    UserInputService = game:GetService("UserInputService"),
+    GuiService = game:GetService("GuiService"),
+    CoreGui = game:GetService("CoreGui")
+}
 
-function Maid:GiveTask(task)
-    table.insert(self._tasks, task)
-    return task
-end
+local LocalPlayer = Services.Players.LocalPlayer
+local Camera = Services.Workspace.CurrentCamera
 
-function Maid:Clean()
-    for i, task in ipairs(self._tasks) do
-        if typeof(task) == "Instance" then
-            task:Destroy()
-        elseif typeof(task) == "RBXScriptConnection" then
-            task:Disconnect()
-        elseif type(task) == "function" then
-            task()
-        elseif type(task) == "table" and task.Destroy then
-            task:Destroy()
-        end
-    end
-    self._tasks = {}
-end
+-- Cache lưu trữ
+getgenv()._G.TargetCache = {}
+local ScreenSize = Camera.ViewportSize
 
-function Maid:Destroy()
-    self:Clean()
-end
+local ViewportConn = Camera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+    ScreenSize = Camera.ViewportSize
+end)
+table.insert(_G.OxenConnections, ViewportConn)
 
-------------------------------------------------------------------------
--- MODULE 2: DRAWING API WRAPPER (Frame-based)
-------------------------------------------------------------------------
--- Polyfill for environments lacking native Drawing API
-local DrawingLib = {}
-local DrawingContainer = Instance.new("ScreenGui")
-DrawingContainer.Name = "WizardOverlay"
-DrawingContainer.IgnoreGuiInset = true
-DrawingContainer.DisplayOrder = 9999
--- Kiểm tra quyền truy cập CoreGui, fallback về PlayerGui
-if pcall(function() DrawingContainer.Parent = CoreGui end) then
-    -- Success
-else
-    DrawingContainer.Parent = LocalPlayer:WaitForChild("PlayerGui")
-end
+--------------------------------------------------------------------------------
+-- // [PHẦN 3] BẢO MẬT & HOOK (GIỮ NGUYÊN TITAN V5 TỪ BẢN GỐC)
+--------------------------------------------------------------------------------
 
-local function CreateBaseFrame(type)
-    local f = Instance.new("Frame")
-    f.BorderSizePixel = 0
-    f.AnchorPoint = Vector2.new(0.5, 0.5)
-    f.BackgroundColor3 = Color3.new(1,1,1)
-    f.Parent = DrawingContainer
-    if type == "Circle" then
-        local corner = Instance.new("UICorner")
-        corner.CornerRadius = UDim.new(1, 0)
-        corner.Parent = f
-    end
-    return f
-end
-
--- Lớp Line (Đường thẳng)
-local Line = {}
-Line.__index = Line
-
-function Line.new()
-    local self = setmetatable({}, Line)
-    self.Visible = true
-    self.Color = Color3.new(1, 1, 1)
-    self.Transparency = 1
-    self.Thickness = 1
-    self.From = Vector2.new(0, 0)
-    self.To = Vector2.new(0, 0)
-    self.Object = CreateBaseFrame("Line")
-    return self
-end
-
-function Line:Update()
-    if not self.Visible then
-        self.Object.Visible = false
-        return
-    end
-    
-    local startPoint = self.From
-    local endPoint = self.To
-    local vector = endPoint - startPoint
-    local length = vector.Magnitude
-    local angle = math.atan2(vector.Y, vector.X)
-    local center = (startPoint + endPoint) / 2
-    
-    self.Object.Visible = true
-    self.Object.Size = UDim2.fromOffset(length, self.Thickness)
-    self.Object.Position = UDim2.fromOffset(center.X, center.Y)
-    self.Object.Rotation = math.deg(angle)
-    self.Object.BackgroundColor3 = self.Color
-    self.Object.BackgroundTransparency = 1 - self.Transparency
-end
-
-function Line:Remove()
-    self.Object:Destroy()
-end
-
--- Lớp Circle (Vòng tròn)
-local Circle = {}
-Circle.__index = Circle
-
-function Circle.new()
-    local self = setmetatable({}, Circle)
-    self.Visible = true
-    self.Color = Color3.new(1, 1, 1)
-    self.Radius = 10
-    self.Position = Vector2.new(0, 0)
-    self.Transparency = 1
-    self.Filled = true
-    self.Object = CreateBaseFrame("Circle")
-    
-    -- Thêm UIStroke để hỗ trợ vòng tròn rỗng (Outline)
-    self.Stroke = Instance.new("UIStroke")
-    self.Stroke.Parent = self.Object
-    return self
-end
-
-function Circle:Update()
-    if not self.Visible then
-        self.Object.Visible = false
-        return
-    end
-    
-    self.Object.Visible = true
-    self.Object.Position = UDim2.fromOffset(self.Position.X, self.Position.Y)
-    self.Object.Size = UDim2.fromOffset(self.Radius * 2, self.Radius * 2)
-    self.Object.BackgroundTransparency = self.Filled and (1 - self.Transparency) or 1
-    self.Object.BackgroundColor3 = self.Color
-    
-    self.Stroke.Enabled = not self.Filled
-    self.Stroke.Color = self.Color
-    self.Stroke.Transparency = 1 - self.Transparency
-end
-
-function Circle:Remove()
-    self.Object:Destroy()
-end
-
-DrawingLib.Line = Line
-DrawingLib.Circle = Circle
-
-------------------------------------------------------------------------
--- MODULE 3: MOBILE UI LIBRARY
-------------------------------------------------------------------------
-local UILib = {}
-
-function UILib:MakeDraggable(frame, trigger)
-    local dragging, dragInput, dragStart, startPos
-    
-    local function update(input)
-        local delta = input.Position - dragStart
-        local newX = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-        -- Sử dụng TweenService để di chuyển mượt mà hơn trên mobile
-        -- frame.Position = newX (Cập nhật trực tiếp sẽ nhanh hơn nhưng giật hơn)
-        frame.Position = newX 
-    end
-    
-    trigger.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStart = input.Position
-            startPos = frame.Position
-            
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
+task.spawn(function()
+    pcall(function()
+        if not getrawmetatable then return end
+        local mt = getrawmetatable(game)
+        setreadonly(mt, false)
+        local oldIndex = mt.__index
+        local oldNamecall = mt.__namecall
+        
+        -- Hook __index: Fake Size cho HBE (Tránh Anti-Cheat quét size nhân vật)
+        mt.__index = newcclosure(function(self, key)
+            if not checkcaller() then
+                if key == "Size" and self:IsA("BasePart") and self.Name == "HumanoidRootPart" then
+                    return Vector3.new(2, 2, 1) -- Luôn trả về size chuẩn
                 end
-            end)
-        end
-    end)
-    
-    trigger.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-            dragInput = input
-        end
-    end)
-    
-    UserInputService.InputChanged:Connect(function(input)
-        if input == dragInput and dragging then
-            update(input)
-        end
-    end)
-end
-
-function UILib:CreateWindow(title)
-    local Window = Instance.new("Frame")
-    Window.Name = "MainUI"
-    Window.Size = Config.UI.Size
-    Window.Position = UDim2.fromScale(0.1, 0.3) -- Vị trí mặc định an toàn cho mobile
-    Window.BackgroundColor3 = Config.UI.ThemeColor
-    Window.BorderSizePixel = 0
-    Window.Parent = DrawingContainer
-    
-    -- Bo góc
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 8)
-    corner.Parent = Window
-    
-    -- Header
-    local Header = Instance.new("Frame")
-    Header.Size = UDim2.new(1, 0, 0, 30)
-    Header.BackgroundColor3 = Config.UI.AccentColor
-    Header.BorderSizePixel = 0
-    Header.Parent = Window
-    
-    local hCorner = Instance.new("UICorner")
-    hCorner.CornerRadius = UDim.new(0, 8)
-    hCorner.Parent = Header
-    
-    -- Che phần bo góc dưới của header để liền mạch
-    local filler = Instance.new("Frame")
-    filler.Size = UDim2.new(1, 0, 0, 10)
-    filler.Position = UDim2.new(0, 0, 1, -10)
-    filler.BackgroundColor3 = Config.UI.AccentColor
-    filler.BorderSizePixel = 0
-    filler.Parent = Header
-    
-    local TitleLbl = Instance.new("TextLabel")
-    TitleLbl.Size = UDim2.new(1, -10, 1, 0)
-    TitleLbl.Position = UDim2.new(0, 10, 0, 0)
-    TitleLbl.BackgroundTransparency = 1
-    TitleLbl.Text = title
-    TitleLbl.TextColor3 = Config.UI.TextColor
-    TitleLbl.Font = Enum.Font.GothamBold
-    TitleLbl.TextSize = 14
-    TitleLbl.TextXAlignment = Enum.TextXAlignment.Left
-    TitleLbl.Parent = Header
-    
-    -- Container cho các element
-    local Container = Instance.new("ScrollingFrame")
-    Container.Size = UDim2.new(1, -10, 1, -40)
-    Container.Position = UDim2.new(0, 5, 0, 35)
-    Container.BackgroundTransparency = 1
-    Container.ScrollBarThickness = 2
-    Container.Parent = Window
-    
-    local UIList = Instance.new("UIListLayout")
-    UIList.Padding = UDim.new(0, 5)
-    UIList.SortOrder = Enum.SortOrder.LayoutOrder
-    UIList.Parent = Container
-    
-    -- Kích hoạt kéo thả
-    self:MakeDraggable(Window, Header)
-    
-    local WindowFuncs = {}
-    
-    function WindowFuncs:AddButton(text, callback)
-        local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(1, 0, 0, 30)
-        btn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-        btn.Text = text
-        btn.TextColor3 = Config.UI.TextColor
-        btn.Font = Enum.Font.GothamSemibold
-        btn.TextSize = 12
-        btn.Parent = Container
-        
-        local bCorner = Instance.new("UICorner")
-        bCorner.CornerRadius = UDim.new(0, 4)
-        bCorner.Parent = btn
-        
-        btn.MouseButton1Click:Connect(callback)
-        btn.TouchTap:Connect(callback) -- Hỗ trợ tốt hơn cho mobile
-    end
-    
-    function WindowFuncs:AddToggle(text, default, callback)
-        local frame = Instance.new("Frame")
-        frame.Size = UDim2.new(1, 0, 0, 30)
-        frame.BackgroundTransparency = 1
-        frame.Parent = Container
-        
-        local lbl = Instance.new("TextLabel")
-        lbl.Size = UDim2.new(0.7, 0, 1, 0)
-        lbl.BackgroundTransparency = 1
-        lbl.Text = text
-        lbl.TextColor3 = Config.UI.TextColor
-        lbl.Font = Enum.Font.Gotham
-        lbl.TextSize = 12
-        lbl.TextXAlignment = Enum.TextXAlignment.Left
-        lbl.Parent = frame
-        
-        local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(0, 40, 0, 20)
-        btn.Position = UDim2.new(1, -45, 0.5, -10)
-        btn.BackgroundColor3 = default and Config.UI.AccentColor or Color3.fromRGB(80, 80, 80)
-        btn.Text = ""
-        btn.Parent = frame
-        
-        local btnCorner = Instance.new("UICorner")
-        btnCorner.CornerRadius = UDim.new(1, 0)
-        btnCorner.Parent = btn
-        
-        local circle = Instance.new("Frame")
-        circle.Size = UDim2.new(0, 16, 0, 16)
-        circle.Position = default and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
-        circle.BackgroundColor3 = Color3.new(1,1,1)
-        circle.Parent = btn
-        
-        local cCorner = Instance.new("UICorner")
-        cCorner.CornerRadius = UDim.new(1, 0)
-        cCorner.Parent = circle
-        
-        local toggled = default
-        
-        local function toggle()
-            toggled = not toggled
-            
-            -- Animation
-            local goalColor = toggled and Config.UI.AccentColor or Color3.fromRGB(80, 80, 80)
-            local goalPos = toggled and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
-            
-            TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3 = goalColor}):Play()
-            TweenService:Create(circle, TweenInfo.new(0.2), {Position = goalPos}):Play()
-            
-            callback(toggled)
-        end
-        
-        btn.MouseButton1Click:Connect(toggle)
-        btn.TouchTap:Connect(toggle)
-    end
-    
-    return WindowFuncs
-end
-
-------------------------------------------------------------------------
--- MODULE 4: VECTOR MATH & PHYSICS ENGINE
-------------------------------------------------------------------------
-local Physics = {}
-
--- Chuyển đổi 3D (World) sang 2D (Screen)
-function Physics.WorldToScreen(worldPos)
-    local screenPos, onScreen = Camera:WorldToViewportPoint(worldPos)
-    return Vector2.new(screenPos.X, screenPos.Y), onScreen
-end
-
--- Chuyển đổi 2D (Screen) sang 3D (World - Plane Y)
--- Giả sử bàn bida nằm phẳng, ta dùng Raycast từ camera để tìm giao điểm
-function Physics.ScreenToWorld(screenPos)
-    local ray = Camera:ViewportPointToRay(screenPos.X, screenPos.Y)
-    -- Giả sử bàn bida ở độ cao Y cụ thể (cần lấy mẫu từ game thực tế)
-    -- Ở đây ta dùng Raycast xuống bàn
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Whitelist
-    -- Cần thêm logic tìm Bàn (Table) vào Whitelist
-    
-    local result = Workspace:Raycast(ray.Origin, ray.Direction * 100, params)
-    if result then return result.Position end
-    return ray.Origin + ray.Direction * 10 -- Fallback
-end
-
--- Phản xạ Vector: R = V - 2(V.N)N
-function Physics.Reflect(vector, normal)
-    return vector - (2 * vector:Dot(normal) * normal)
-end
-
--- Phát hiện va chạm Sphere-Sphere (Đơn giản hóa cho 2D trên mặt phẳng XZ)
-function Physics.CheckBallCollision(posA, radiusA, posB, radiusB)
-    local diff = Vector3.new(posA.X - posB.X, 0, posA.Z - posB.Z)
-    local dist = diff.Magnitude
-    if dist < (radiusA + radiusB) then
-        return true, diff.Unit -- Trả về Hit và Normal
-    end
-    return false, nil
-end
-
--- Tìm bi cái và các bi khác
-function Physics.ScanTable()
-    local balls = {}
-    local cueBall = nil
-    
-    -- Cần logic quét Workspace cụ thể cho từng game.
-    -- Ví dụ này giả định folder "Balls"
-    local folder = Workspace:FindFirstChild("Balls")
-    if folder then
-        for _, child in ipairs(folder:GetChildren()) do
-            if child:IsA("BasePart") then
-                if child.Name == "CueBall" then -- Tên giả định
-                    cueBall = child
-                else
-                    table.insert(balls, child)
-                end
+                if key == "WalkSpeed" and self:IsA("Humanoid") then return 16 end
+                if key == "JumpPower" and self:IsA("Humanoid") then return 50 end
             end
-        end
-    end
-    return cueBall, balls
+            return oldIndex(self, key)
+        end)
+        
+        -- Hook __namecall: Anti-Kick
+        mt.__namecall = newcclosure(function(self, ...)
+            local method = getnamecallmethod()
+            if method == "Kick" or method == "kick" or method == "Shutdown" then
+                return nil 
+            end
+            return oldNamecall(self, ...)
+        end)
+        setreadonly(mt, true)
+    end)
+end)
+
+--------------------------------------------------------------------------------
+-- // [PHẦN 4] HỖ TRỢ & LOGIC MỚI (AIMBOT & ESP)
+--------------------------------------------------------------------------------
+
+-- 4.1. Helper Functions
+local function IsAlive(player)
+    if not player or not player.Character then return false end
+    local hum = player.Character:FindFirstChild("Humanoid")
+    return hum and hum.Health > 0
 end
 
-------------------------------------------------------------------------
--- MODULE 5: PREDICTION ALGORITHM (GHOST BALL)
-------------------------------------------------------------------------
-local Predictor = {}
-Predictor.Lines = {} -- Pool chứa các Line
-Predictor.Ghost = nil
-
--- Khởi tạo Pool cho Drawing Lines
-function Predictor:InitDrawingPool()
-    for i = 1, 50 do -- 50 đoạn thẳng tối đa
-        table.insert(self.Lines, DrawingLib.Line.new())
-    end
-    self.Ghost = DrawingLib.Circle.new()
-    self.Ghost.Filled = false
-    self.Ghost.Color = Color3.fromRGB(255, 255, 0)
-    self.Ghost.Visible = false
+local function IsTeam(player)
+    if player == LocalPlayer then return true end
+    if _G.OXEN_SETTINGS.BACKSTAB.FFA then return false end
+    if player.Team and LocalPlayer.Team and player.Team == LocalPlayer.Team then return true end
+    return false
 end
 
-function Predictor:ResetDrawings()
-    for _, line in ipairs(self.Lines) do
-        line.Visible = false
-        line:Update()
-    end
-    self.Ghost.Visible = false
-    self.Ghost:Update()
+local function IsVisible(targetChar)
+    if not _G.OXEN_SETTINGS.AIM.WallCheck then return true end
+    local origin = Camera.CFrame.Position
+    local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
+    if not targetRoot then return false end
+    
+    local parts = Camera:GetPartsObscuringTarget({targetRoot.Position}, {LocalPlayer.Character, targetChar})
+    return #parts == 0
 end
 
--- Thuật toán dự đoán chính
-function Predictor:Update(cueBall, otherBalls)
-    self:ResetDrawings()
-    
-    if not cueBall then return end
-    
-    -- 1. Xác định hướng đánh
-    -- Logic này phụ thuộc vào cách game điều khiển (Mouse hay Drag gậy)
-    -- Giả sử hướng đánh dựa trên Camera LookVector (FPS mode) hoặc Gậy
-    local aimDir = Camera.CFrame.LookVector
-    aimDir = Vector3.new(aimDir.X, 0, aimDir.Z).Unit -- Chiếu xuống 2D
-    
-    local startPos = cueBall.Position
-    local currentPos = startPos
-    local currentDir = aimDir
-    local remainingDist = Config.Prediction.MaxLength
-    
-    local lineIndex = 1
-    
-    -- Vòng lặp các bước va chạm (Bounces)
-    for step = 1, Config.Prediction.MaxSteps do
-        if remainingDist <= 0 then break end
-        
-        -- Raycast thủ công (Custom Raycast) để tìm va chạm bóng hoặc tường
-        -- Trong thực tế, cần SphereCast (ShapeCast) để chính xác với kích thước bóng
-        
-        local hitResult = nil
-        local minHitDist = remainingDist
-        local hitObj = nil
-        local hitNormal = nil
-        local hitType = nil -- "Ball" or "Wall"
-        
-        -- Kiểm tra va chạm với các bóng khác
-        for _, ball in ipairs(otherBalls) do
-            -- Toán học giao điểm Ray-Sphere (Đơn giản hóa 2D)
-            local toBall = ball.Position - currentPos
-            local t = toBall:Dot(currentDir)
-            local closestPoint = currentPos + currentDir * t
-            local distToCenter = (closestPoint - ball.Position).Magnitude
+-- 4.2. ESP Engine Mới (Highlight - Siêu nhẹ)
+local HighlightStorage = {}
+
+local function UpdateESP()
+    for _, player in pairs(Services.Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local char = player.Character
             
-            -- Kiểm tra va chạm: Khoảng cách < 2 * Bán kính (Ghost Ball touch)
-            if t > 0 and t < minHitDist and distToCenter < (Physics.BallRadius * 2) then
-                -- Tính chính xác điểm va chạm bề mặt
-                local offset = math.sqrt((Physics.BallRadius * 2)^2 - distToCenter^2)
-                local hitDist = t - offset
+            -- Logic Highlight
+            if _G.OXEN_SETTINGS.VISUALS.ESP_Enabled then
+                local hl = char:FindFirstChild("OxenHighlight")
+                if not hl then
+                    hl = Instance.new("Highlight")
+                    hl.Name = "OxenHighlight"
+                    hl.Adornee = char
+                    hl.Parent = char
+                end
                 
-                if hitDist > 0 and hitDist < minHitDist then
-                    minHitDist = hitDist
-                    hitResult = currentPos + currentDir * hitDist
-                    hitObj = ball
-                    hitType = "Ball"
-                    hitNormal = (hitResult - ball.Position).Unit -- Sai, Ghost Ball logic khác
-                    -- Normal thực tế là đường nối tâm bóng ảo và bóng thật
-                    local ghostBallPos = currentPos + currentDir * hitDist
-                    hitNormal = (ghostBallPos - ball.Position).Unit
+                if IsTeam(player) then
+                    hl.FillColor = Color3.fromRGB(0, 255, 0) -- Đồng đội màu xanh
+                else
+                    hl.FillColor = _G.OXEN_SETTINGS.VISUALS.FillColor -- Địch màu đỏ
                 end
+                
+                hl.OutlineColor = _G.OXEN_SETTINGS.VISUALS.OutlineColor
+                hl.FillTransparency = 0.5
+                hl.OutlineTransparency = 0
+                hl.Enabled = true
+            else
+                local hl = char:FindFirstChild("OxenHighlight")
+                if hl then hl.Enabled = false end
             end
         end
-        
-        -- Kiểm tra va chạm với tường (Giả sử Raycast của Workspace hoạt động với tường)
-        -- Cần lọc bỏ bóng khỏi raycast này
-        local rayParams = RaycastParams.new()
-        rayParams.FilterType = Enum.RaycastFilterType.Blacklist
-        local ignoreList = {cueBall}
-        for _, b in ipairs(otherBalls) do table.insert(ignoreList, b) end
-        rayParams.FilterDescendantsInstances = ignoreList
-        
-        local wallHit = Workspace:Raycast(currentPos, currentDir * minHitDist, rayParams)
-        
-        if wallHit then
-            minHitDist = wallHit.Distance
-            hitResult = wallHit.Position
-            hitNormal = wallHit.Normal
-            hitType = "Wall"
-            hitObj = wallHit.Instance
-        end
-        
-        -- Vẽ đường từ currentPos đến điểm va chạm
-        local endPos = currentPos + currentDir * minHitDist
-        
-        -- Chuyển tọa độ World -> Screen để vẽ bằng Frame
-        local s1, v1 = Physics.WorldToScreen(currentPos)
-        local s2, v2 = Physics.WorldToScreen(endPos)
-        
-        if v1 or v2 then -- Chỉ vẽ nếu ít nhất 1 điểm trong màn hình
-            local line = self.Lines[lineIndex]
-            if line then
-                line.From = s1
-                line.To = s2
-                line.Color = (step == 1) and Config.Prediction.Color or Config.Prediction.BounceColor
-                line.Visible = true
-                line:Update()
-                lineIndex = lineIndex + 1
-            end
-        end
-        
-        -- Xử lý sau va chạm
-        if hitResult then
-            if hitType == "Wall" then
-                currentDir = Physics.Reflect(currentDir, hitNormal)
-                currentPos = hitResult + currentDir * 0.1 -- Đẩy nhẹ ra khỏi tường
-            elseif hitType == "Ball" then
-                -- Vẽ Ghost Ball tại điểm va chạm
-                if Config.Prediction.GhostBall then
-                    local sG, vG = Physics.WorldToScreen(endPos)
-                    if vG then
-                        self.Ghost.Position = sG
-                        -- Cần tính bán kính trên màn hình dựa trên khoảng cách camera
-                        -- Công thức ước lượng: (WorldRadius * ScreenHeight) / (FOV * Depth)
-                        local depth = (endPos - Camera.CFrame.Position).Magnitude
-                        local screenRad = (Physics.BallRadius * 500) / depth -- Hệ số 500 ước lượng
-                        self.Ghost.Radius = screenRad
-                        self.Ghost.Visible = true
-                        self.Ghost:Update()
+    end
+end
+
+local ESPLoop = Services.RunService.RenderStepped:Connect(UpdateESP)
+table.insert(_G.OxenConnections, ESPLoop)
+
+-- 4.3. Trigger Aimbot Engine (Logic Mới)
+local isFiring = false
+
+-- Detect input bắn (Mobile Touch + PC Mouse)
+Services.UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        isFiring = true
+    end
+end)
+
+Services.UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        isFiring = false
+    end
+end)
+
+local function GetSmartTarget()
+    local bestTarget = nil
+    local shortestDist = _G.OXEN_SETTINGS.AIM.FOV_Radius
+    local mousePos = Services.UserInputService:GetMouseLocation()
+
+    for _, player in pairs(Services.Players:GetPlayers()) do
+        if IsAlive(player) and not IsTeam(player) then
+            local char = player.Character
+            local part = char:FindFirstChild(_G.OXEN_SETTINGS.CORE.TargetPart) or char:FindFirstChild("Head")
+            
+            if part then
+                local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+                if onScreen then
+                    -- Kiểm tra WallCheck
+                    if IsVisible(char) then
+                        local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+                        if dist < shortestDist then
+                            shortestDist = dist
+                            bestTarget = part
+                        end
                     end
                 end
-                
-                -- Bi cái sẽ bật ra theo hướng tiếp tuyến (Tangent)
-                -- Vận tốc bi mục tiêu sẽ theo hướng Normal
-                -- Vận tốc bi cái mới vuông góc với Normal
-                -- Logic phản xạ đơn giản:
-                local tangent = (currentDir - (currentDir:Dot(hitNormal) * hitNormal)).Unit
-                currentDir = tangent
-                currentPos = endPos + currentDir * 0.1
-                
-                -- Có thể vẽ thêm đường dự đoán cho bi mục tiêu (Target Ball Line)
-                --...
             end
-        else
-            break -- Không va chạm gì, kết thúc
         end
+    end
+    return bestTarget
+end
+
+local AimbotLoop = Services.RunService.RenderStepped:Connect(function()
+    -- Logic Trigger: Chỉ Aim khi đang bắn (isFiring) VÀ Aim bật
+    if _G.OXEN_SETTINGS.AIM.Enabled and isFiring then
+        local targetPart = GetSmartTarget()
+        if targetPart then
+            local currentCF = Camera.CFrame
+            local targetCF = CFrame.new(currentCF.Position, targetPart.Position)
+            
+            -- Dùng Lerp để xoay mượt, không giật cục
+            Camera.CFrame = currentCF:Lerp(targetCF, _G.OXEN_SETTINGS.AIM.Smoothness)
+        end
+    end
+end)
+table.insert(_G.OxenConnections, AimbotLoop)
+
+--------------------------------------------------------------------------------
+-- // [PHẦN 5] TÍNH NĂNG CỐT LÕI KHÁC (GIỮ NGUYÊN BẢN GỐC)
+--------------------------------------------------------------------------------
+
+-- 5.1. Hitbox Expander (HBE)
+-- Giữ nguyên logic HBE logic vì nó kết hợp tốt với Hook bảo mật
+local HBELoop = task.spawn(function()
+    while task.wait(0.1) do
+        if _G.OXEN_SETTINGS.HBE.Enabled then
+            for _, p in pairs(Services.Players:GetPlayers()) do
+                if p ~= LocalPlayer and IsAlive(p) and not IsTeam(p) then
+                    local root = p.Character:FindFirstChild("HumanoidRootPart")
+                    if root and root.Size.X ~= _G.OXEN_SETTINGS.HBE.Size then
+                        root.Size = Vector3.new(_G.OXEN_SETTINGS.HBE.Size, _G.OXEN_SETTINGS.HBE.Size, _G.OXEN_SETTINGS.HBE.Size)
+                        root.Transparency = _G.OXEN_SETTINGS.HBE.Transparency
+                        root.Color = _G.OXEN_SETTINGS.HBE.Color
+                        root.CanCollide = false
+                        root.Material = Enum.Material.Neon
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- 5.2. Backstab (Logic V3 - Auto Face)
+local BackstabConn = Services.RunService.Heartbeat:Connect(function()
+    if not _G.OXEN_SETTINGS.BACKSTAB.Enabled or not LocalPlayer.Character then return end
+    
+    local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return end
+    
+    local closest, minDist = nil, 15 -- Phạm vi kích hoạt backstab
+    
+    for _, p in pairs(Services.Players:GetPlayers()) do
+        if p ~= LocalPlayer and IsAlive(p) and not IsTeam(p) then
+            local tRoot = p.Character.HumanoidRootPart
+            local dist = (tRoot.Position - myRoot.Position).Magnitude
+            if dist < minDist then
+                minDist = dist
+                closest = tRoot
+            end
+        end
+    end
+    
+    if closest then
+        local backPos = (closest.CFrame * CFrame.new(0, 0, _G.OXEN_SETTINGS.BACKSTAB.Distance)).Position
+        local lookAt = Vector3.new(closest.Position.X, backPos.Y, closest.Position.Z)
         
-        remainingDist = remainingDist - minHitDist
+        myRoot.CFrame = CFrame.lookAt(backPos, lookAt)
+        myRoot.Velocity = Vector3.zero -- Chống trượt
+    end
+end)
+table.insert(_G.OxenConnections, BackstabConn)
+
+-- 5.3. Mobile Fly UI & Logic
+local FlyUI = nil
+local function ToggleFly(state)
+    if state then
+        if not FlyUI then
+            local sg = Instance.new("ScreenGui", game:GetService("CoreGui"))
+            local fr = Instance.new("Frame", sg)
+            fr.Size = UDim2.new(0, 100, 0, 120)
+            fr.Position = UDim2.new(0.05, 0, 0.3, 0)
+            fr.BackgroundTransparency = 1
+            
+            local function mkBtn(txt, pos, var)
+                local b = Instance.new("TextButton", fr)
+                b.Size = UDim2.new(1,0,0.45,0)
+                b.Position = pos
+                b.Text = txt
+                b.BackgroundColor3 = Color3.new(0.1,0.1,0.1)
+                b.TextColor3 = Color3.new(1,1,1)
+                b.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseButton1 then _G[var]=true end end)
+                b.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseButton1 then _G[var]=false end end)
+            end
+            mkBtn("UP", UDim2.new(0,0,0,0), "FlyUp")
+            mkBtn("DOWN", UDim2.new(0,0,0.55,0), "FlyDown")
+            FlyUI = sg
+        end
+        FlyUI.Enabled = true
+        
+        -- Fly Logic
+        task.spawn(function()
+            while _G.OXEN_SETTINGS.MOVEMENT.Fly.Enabled do
+                local rs = Services.RunService.RenderStepped:Wait()
+                local char = LocalPlayer.Character
+                if char and char:FindFirstChild("HumanoidRootPart") then
+                    local root = char.HumanoidRootPart
+                    local hum = char.Humanoid
+                    hum.PlatformStand = true
+                    
+                    local vel = Vector3.zero
+                    if hum.MoveDirection.Magnitude > 0 then
+                        vel = Camera.CFrame.LookVector * _G.OXEN_SETTINGS.MOVEMENT.Fly.Speed
+                    end
+                    if _G.FlyUp then vel = vel + Vector3.new(0, _G.OXEN_SETTINGS.MOVEMENT.Fly.Speed, 0) end
+                    if _G.FlyDown then vel = vel + Vector3.new(0, -_G.OXEN_SETTINGS.MOVEMENT.Fly.Speed, 0) end
+                    
+                    root.Velocity = vel
+                end
+            end
+        end)
+    else
+        if FlyUI then FlyUI.Enabled = false end
+        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+            LocalPlayer.Character.Humanoid.PlatformStand = false
+        end
     end
 end
 
-------------------------------------------------------------------------
--- MODULE 6: MAIN CONTROLLER
-------------------------------------------------------------------------
-local Main = {}
+--------------------------------------------------------------------------------
+-- // [PHẦN 6] UI LIBRARY (RAYFIELD - GIỮ NGUYÊN)
+--------------------------------------------------------------------------------
 
-function Main:Start()
-    -- 1. Khởi tạo Drawing
-    Predictor:InitDrawingPool()
-    
-    -- 2. Tạo UI
-    local Window = UILib:CreateWindow("8-Ball Wizard")
-    
-    Window:AddToggle("Enable Prediction", true, function(state)
-        Config.Prediction.Enabled = state
-        if not state then Predictor:ResetDrawings() end
-    end)
-    
-    Window:AddToggle("Show Ghost Ball", true, function(state)
-        Config.Prediction.GhostBall = state
-    end)
-    
-    Window:AddButton("Unload Script", function()
-        -- Dọn dẹp bộ nhớ
-        DrawingContainer:Destroy()
-        -- Ngắt kết nối RunService (Cần quản lý connection biến)
-        script.Disabled = true 
-    end)
-    
-    -- 3. Vòng lặp Render
-    RunService.RenderStepped:Connect(function(dt)
-        if not Config.Prediction.Enabled then return end
-        
-        local cue, others = Physics.ScanTable()
-        if cue then
-            Predictor:Update(cue, others)
-        else
-            Predictor:ResetDrawings()
-        end
-    end)
-end
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
--- Chạy hệ thống
-Main:Start()
+local Window = Rayfield:CreateWindow({
+    Name = "Oxen Hub | Ultimate Remaster",
+    LoadingTitle = "Optimizing...",
+    LoadingSubtitle = "AI Powered",
+    ConfigurationSaving = { Enabled = true, FolderName = "OxenRemaster", FileName = "Config" },
+    KeySystem = false
+})
 
---]
+-- TAB 1: COMBAT
+local CombatTab = Window:CreateTab("Combat", 4483362458)
+
+CombatTab:CreateSection("Smart Aimbot (Trigger)")
+CombatTab:CreateToggle({
+    Name = "Enable Trigger Aimbot",
+    CurrentValue = false,
+    Callback = function(Value) _G.OXEN_SETTINGS.AIM.Enabled = Value end,
+})
+CombatTab:CreateSlider({
+    Name = "Smoothness (0.1 = Fast)",
+    Range = {0.05, 1},
+    Increment = 0.05,
+    CurrentValue = 0.2,
+    Callback = function(Value) _G.OXEN_SETTINGS.AIM.Smoothness = Value end,
+})
+CombatTab:CreateSlider({
+    Name = "FOV Radius",
+    Range = {50, 500},
+    Increment = 10,
+    CurrentValue = 150,
+    Callback = function(Value) _G.OXEN_SETTINGS.AIM.FOV_Radius = Value end,
+})
+
+CombatTab:CreateSection("Hitbox Expander")
+CombatTab:CreateToggle({
+    Name = "Enable HBE",
+    CurrentValue = false,
+    Callback = function(Value) _G.OXEN_SETTINGS.HBE.Enabled = Value end,
+})
+CombatTab:CreateSlider({
+    Name = "Hitbox Size",
+    Range = {2, 30},
+    Increment = 1,
+    CurrentValue = 15,
+    Callback = function(Value) _G.OXEN_SETTINGS.HBE.Size = Value end,
+})
+
+-- TAB 2: VISUALS
+local VisualTab = Window:CreateTab("Visuals", 4483362458)
+VisualTab:CreateSection("ESP Highlight (No Lag)")
+VisualTab:CreateToggle({
+    Name = "Enable ESP",
+    CurrentValue = true,
+    Callback = function(Value) _G.OXEN_SETTINGS.VISUALS.ESP_Enabled = Value end,
+})
+
+-- TAB 3: MOVEMENT
+local MoveTab = Window:CreateTab("Movement", 4483362458)
+MoveTab:CreateSection("Features")
+MoveTab:CreateToggle({
+    Name = "Mobile Fly (UI)",
+    CurrentValue = false,
+    Callback = function(Value) 
+        _G.OXEN_SETTINGS.MOVEMENT.Fly.Enabled = Value 
+        ToggleFly(Value)
+    end,
+})
+MoveTab:CreateToggle({
+    Name = "Auto Backstab",
+    CurrentValue = false,
+    Callback = function(Value) _G.OXEN_SETTINGS.BACKSTAB.Enabled = Value end,
+})
+MoveTab:CreateSlider({
+    Name = "Walk Speed",
+    Range = {16, 300},
+    Increment = 1,
+    CurrentValue = 16,
+    Callback = function(Value) 
+        _G.OXEN_SETTINGS.MOVEMENT.SpeedEnabled = true
+        if LocalPlayer.Character then LocalPlayer.Character.Humanoid.WalkSpeed = Value end
+    end,
+})
+
+Rayfield:LoadConfiguration()
+warn("OXEN HUB REMASTER LOADED")
