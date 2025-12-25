@@ -1,255 +1,294 @@
---[[
-    ► MOBILE AIMBOT PRO (STANDALONE EDITION)
-    ► Optimized for: Delta X, Hydrogen, Fluxus (Android/iOS)
-    ► Build: V2.0 (Silent + Assist)
-    ► Logic: Raw Performance (No UI, Just Power)
-]]
+--]
 
--- // 1. CẤU HÌNH (SETTINGS)
--- Bạn có thể chỉnh sửa trực tiếp tại đây
-getgenv().MobileConfig = {
-    Keybind = Enum.UserInputType.MouseButton1, -- Chạm màn hình để bắn/aim
-    ShowFOV = true,             -- Hiện vòng tròn FOV
-    FOV_Radius = 150,           -- Bán kính vòng tròn (To hơn để dễ aim trên mobile)
-    FOV_Color = Color3.fromRGB(255, 0, 0), -- Màu đỏ chiến
-    
-    SilentAim = {
-        Enabled = true,
-        HitChance = 100,        -- Tỉ lệ trúng (100 = Luôn trúng)
-        Part = "HumanoidRootPart", -- Bộ phận nhắm (Head, Torso, HumanoidRootPart)
-        Prediction = 0.145,     -- Dự đoán di chuyển (Ping 60-100ms)
-        AutoPred = true         -- Tự động chỉnh Pred theo Ping
-    },
-    
-    Checks = {
-        WallCheck = true,       -- Không bắn xuyên tường (Tắt để giảm lag nếu máy yếu)
-        TeamCheck = true,       -- Không bắn đồng đội
-        KnockedCheck = true,    -- Không bắn người bị knock (Da Hood)
-        ForceFieldCheck = true  -- Không bắn người có khiên bất tử
-    }
-}
-
--- // 2. DỊCH VỤ & KHỞI TẠO
+--// 1. SERVICES //--
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
-local GuiService = game:GetService("GuiService")
-local Stats = game:GetService("Stats")
-
-local LocalPlayer = Players.LocalPlayer
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
 local Camera = Workspace.CurrentCamera
-local Mouse = LocalPlayer:GetMouse()
+local LocalPlayer = Players.LocalPlayer
 
--- Quản lý Drawing (Vẽ vòng tròn) - Tối ưu cho Mobile Executor
--- Khai báo Global để tránh lỗi mất hình trên Delta
-local FOVCircle = Drawing.new("Circle")
-FOVCircle.Visible = MobileConfig.ShowFOV
-FOVCircle.Thickness = 1.5
-FOVCircle.NumSides = 24 -- Giảm số cạnh để đỡ lag trên điện thoại yếu
-FOVCircle.Radius = MobileConfig.FOV_Radius
-FOVCircle.Filled = false
-FOVCircle.Transparency = 1
-FOVCircle.Color = MobileConfig.FOV_Color
+--// 2. CẤU HÌNH (SETTINGS) //--
+local Config = {
+    -- Tên của bi cái trong game (Cần chỉnh sửa nếu game đặt tên khác)
+    -- Các tên phổ biến: "CueBall", "WhiteBall", "MainBall"
+    BallName = "CueBall", 
+    
+    -- Màu sắc
+    LineColor = Color3.fromRGB(255, 255, 255),      -- Màu đường chính
+    BounceColor = Color3.fromRGB(0, 255, 0),        -- Màu đường sau khi nảy
+    DotColor = Color3.new(0, 0, 0),                 -- Màu chấm đen lỗ
+    
+    -- Thông số kỹ thuật
+    LineWidth = 3,           -- Độ dày đường vẽ
+    MaxDistance = 50,        -- Độ dài tối đa của tia dự đoán
+    MaxBounces = 3,          -- Số lần nảy băng tối đa
+    DotSize = 30             -- Kích thước chấm định vị lỗ (pixel)
+}
 
--- Biến lưu mục tiêu toàn cục (để Hook sử dụng)
-getgenv()._G.MobileAimTarget = nil
+--// 3. THƯ VIỆN VẼ GUI (VIRTUAL DRAWING LIB) //--
+-- Thay thế Drawing.new để tránh lỗi trên Delta Mobile
+local DrawLib = {}
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "BidaPredictionOverlay"
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.DisplayOrder = 10000
+ScreenGui.ResetOnSpawn = false
 
--- // 3. HÀM HỖ TRỢ (OPTIMIZED FUNCTIONS)
+-- Bảo vệ GUI (nếu Executor hỗ trợ)
+if syn and syn.protect_gui then
+    syn.protect_gui(ScreenGui)
+    ScreenGui.Parent = CoreGui
+elseif gethui then
+    ScreenGui.Parent = gethui()
+else
+    ScreenGui.Parent = CoreGui
+end
 
--- Kiểm tra mục tiêu hợp lệ (Gộp chung để gọi 1 lần)
-local function IsValidTarget(plr)
-    if not plr or not plr.Character or plr == LocalPlayer then return false end
-    
-    local hum = plr.Character:FindFirstChild("Humanoid")
-    local root = plr.Character:FindFirstChild("HumanoidRootPart")
-    
-    if not hum or not root or hum.Health <= 0 then return false end
-    
-    -- Check ForceField
-    if MobileConfig.Checks.ForceFieldCheck and plr.Character:FindFirstChildOfClass("ForceField") then return false end
-    
-    -- Check Team
-    if MobileConfig.Checks.TeamCheck and LocalPlayer.Team ~= nil and plr.Team ~= nil and plr.Team == LocalPlayer.Team then return false end
-    
-    -- Check Knocked (Da Hood specific)
-    if MobileConfig.Checks.KnockedCheck then
-        local be = plr.Character:FindFirstChild("BodyEffects")
-        if be then
-            local ko = be:FindFirstChild("K.O") or be:FindFirstChild("KO")
-            if ko and ko.Value then return false end
-        end
-        if plr.Character:FindFirstChild("GRABBING_CONSTRAINT") then return false end
+local LinePool = {}
+local ActiveLines = {}
+
+-- Hàm lấy Frame từ "bể chứa" (Object Pooling) để tiết kiệm RAM
+local function GetLineFrame()
+    local line = table.remove(LinePool)
+    if not line then
+        line = Instance.new("Frame")
+        line.Name = "Line"
+        line.AnchorPoint = Vector2.new(0.5, 0.5)
+        line.BorderSizePixel = 0
+        line.ZIndex = 5
+        line.Parent = ScreenGui
     end
-    
-    return true
+    line.Visible = true
+    return line
 end
 
--- Raycast WallCheck (Tái sử dụng Params để tiết kiệm RAM)
-local RayParams = RaycastParams.new()
-RayParams.FilterType = Enum.RaycastFilterType.Exclude
-RayParams.IgnoreWater = true
-
-local function IsVisible(target)
-    if not MobileConfig.Checks.WallCheck then return true end
-    if not LocalPlayer.Character then return false end
-    
-    -- Cập nhật danh sách bỏ qua
-    RayParams.FilterDescendantsInstances = {LocalPlayer.Character, target.Character, Camera}
-    
-    local origin = Camera.CFrame.Position
-    local dest = target.Character[MobileConfig.SilentAim.Part].Position
-    local dir = dest - origin
-    
-    local ray = Workspace:Raycast(origin, dir, RayParams)
-    
-    -- Nếu không trúng gì hoặc trúng nhân vật địch -> Nhìn thấy
-    return ray == nil or ray.Instance:IsDescendantOf(target.Character)
+function DrawLib:Clear()
+    for _, line in ipairs(ActiveLines) do
+        line.Visible = false
+        table.insert(LinePool, line)
+    end
+    table.clear(ActiveLines)
 end
 
--- Chuyển tọa độ thế giới sang màn hình
-local function GetScreenPos(pos)
-    local screen, onScreen = Camera:WorldToViewportPoint(pos)
-    return Vector2.new(screen.X, screen.Y), onScreen
+function DrawLib:DrawLine(from, to, color, thickness)
+    local center = (from + to) / 2
+    local vector = to - from
+    local length = vector.Magnitude
+    if length < 1 then return end -- Không vẽ nếu quá ngắn
+
+    local angle = math.atan2(vector.Y, vector.X)
+    local line = GetLineFrame()
+
+    line.Position = UDim2.fromOffset(center.X, center.Y)
+    line.Size = UDim2.fromOffset(length, thickness or Config.LineWidth)
+    line.Rotation = math.deg(angle)
+    line.BackgroundColor3 = color or Config.LineColor
+    
+    table.insert(ActiveLines, line)
 end
 
--- Tính toán Prediction tự động theo Ping
-local function GetAutoPred()
-    if not MobileConfig.SilentAim.AutoPred then return MobileConfig.SilentAim.Prediction end
-    
-    local ping = Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
-    -- Công thức ước lượng đơn giản nhưng hiệu quả
-    if ping < 30 then return 0.11
-    elseif ping < 60 then return 0.125
-    elseif ping < 90 then return 0.138
-    elseif ping < 130 then return 0.152
-    else return 0.165 end
-end
+--// 4. HỆ THỐNG 6 CHẤM ĐỊNH VỊ (CALIBRATION DOTS) //--
+local Calibration = {}
+local Dots = {}
 
--- // 4. LOGIC TÌM MỤC TIÊU (TARGET SELECTOR)
-local function GetClosestPlayer()
-    local bestTarget = nil
-    local shortestDist = math.huge
-    local mousePos = Vector2.new(Camera.ViewportSize.X / 2, (Camera.ViewportSize.Y / 2) + GuiService:GetGuiInset().Y) -- Tâm màn hình chuẩn
-    
-    for _, plr in pairs(Players:GetPlayers()) do
-        if IsValidTarget(plr) then
-            local part = plr.Character[MobileConfig.SilentAim.Part]
-            local screenPos, onScreen = GetScreenPos(part.Position)
-            
-            if onScreen then
-                local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+function Calibration:Init()
+    local CalibGui = Instance.new("ScreenGui")
+    CalibGui.Name = "CalibrationUI"
+    CalibGui.DisplayOrder = 10001
+    if gethui then CalibGui.Parent = gethui() else CalibGui.Parent = CoreGui end
+
+    -- Hàm làm cho GUI kéo thả được trên Mobile
+    local function MakeDraggable(guiObject)
+        local dragging = false
+        local dragInput, dragStart, startPos
+
+        guiObject.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                dragging = true
+                dragStart = input.Position
+                startPos = guiObject.Position
                 
-                -- Chỉ xét trong vòng FOV
-                if dist <= MobileConfig.FOV_Radius then
-                    -- WallCheck chỉ chạy khi đã thỏa mãn các điều kiện trên (Tiết kiệm CPU)
-                    if IsVisible(plr) then
-                        if dist < shortestDist then
-                            shortestDist = dist
-                            bestTarget = plr
-                        end
+                input.Changed:Connect(function()
+                    if input.UserInputState == Enum.UserInputState.End then
+                        dragging = false
                     end
-                end
+                end)
             end
-        end
+        end)
+
+        guiObject.InputChanged:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+                dragInput = input
+            end
+        end)
+
+        UserInputService.InputChanged:Connect(function(input)
+            if input == dragInput and dragging then
+                local delta = input.Position - dragStart
+                guiObject.Position = UDim2.new(
+                    startPos.X.Scale, 
+                    startPos.X.Offset + delta.X, 
+                    startPos.Y.Scale, 
+                    startPos.Y.Offset + delta.Y
+                )
+            end
+        end)
     end
+
+    -- Tạo 6 chấm đen
+    -- Vị trí mặc định (tương đối)
+    local defaultPositions = {
+        UDim2.new(0.1, 0, 0.2, 0), UDim2.new(0.5, 0, 0.15, 0), UDim2.new(0.9, 0, 0.2, 0), -- 3 lỗ trên
+        UDim2.new(0.1, 0, 0.8, 0), UDim2.new(0.5, 0, 0.85, 0), UDim2.new(0.9, 0, 0.8, 0)  -- 3 lỗ dưới
+    }
+
+    for i = 1, 6 do
+        local dot = Instance.new("Frame")
+        dot.Name = "HoleDot_".. i
+        dot.Size = UDim2.fromOffset(Config.DotSize, Config.DotSize)
+        dot.BackgroundColor3 = Config.DotColor
+        dot.AnchorPoint = Vector2.new(0.5, 0.5)
+        dot.Position = defaultPositions[i]
+        
+        -- Làm tròn thành hình tròn
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(1, 0)
+        corner.Parent = dot
+        
+        -- Viền trắng để dễ nhìn
+        local stroke = Instance.new("UIStroke")
+        stroke.Color = Color3.new(1, 1, 1)
+        stroke.Thickness = 2
+        stroke.Parent = dot
+        
+        dot.Parent = CalibGui
+        MakeDraggable(dot)
+        table.insert(Dots, dot)
+    end
+
+    -- Nút Ẩn/Hiện Chấm (Toggle UI)
+    local toggleBtn = Instance.new("TextButton")
+    toggleBtn.Name = "ToggleDots"
+    toggleBtn.Size = UDim2.fromOffset(100, 40)
+    toggleBtn.Position = UDim2.new(0.5, -50, 0.05, 0)
+    toggleBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    toggleBtn.TextColor3 = Color3.new(1, 1, 1)
+    toggleBtn.Text = "Ẩn Lỗ (Hide)"
+    toggleBtn.Font = Enum.Font.GothamBold
+    toggleBtn.TextSize = 14
     
-    return bestTarget
+    local cornerBtn = Instance.new("UICorner")
+    cornerBtn.CornerRadius = UDim.new(0, 8)
+    cornerBtn.Parent = toggleBtn
+    
+    toggleBtn.Parent = CalibGui
+
+    local isVisible = true
+    toggleBtn.MouseButton1Click:Connect(function()
+        isVisible = not isVisible
+        for _, dot in ipairs(Dots) do
+            dot.Visible = isVisible
+        end
+        toggleBtn.Text = isVisible and "Ẩn Lỗ (Hide)" or "Hiện Lỗ (Show)"
+    end)
 end
 
--- // 5. CORE LOOP (VÒNG LẶP CHÍNH)
--- Sử dụng RenderStepped để cập nhật FOV và Aim mượt mà nhất
-RunService.RenderStepped:Connect(function()
-    -- Cập nhật Prediction
-    if MobileConfig.SilentAim.AutoPred then
-        MobileConfig.SilentAim.Prediction = GetAutoPred()
-    end
+--// 5. PHYSICS ENGINE (XỬ LÝ VẬT LÝ) //--
 
-    -- Cập nhật vị trí vòng tròn theo tâm màn hình
-    local center = Vector2.new(Camera.ViewportSize.X / 2, (Camera.ViewportSize.Y / 2) + GuiService:GetGuiInset().Y)
-    FOVCircle.Position = center
-    FOVCircle.Radius = MobileConfig.FOV_Radius
-    FOVCircle.Color = MobileConfig.FOV_Color
-    FOVCircle.Visible = MobileConfig.ShowFOV
+local function GetCueBall()
+    -- Tìm bi cái trong Workspace. Bạn có thể cần sửa tên "CueBall" tùy vào game
+    -- Game bida thường để bi trong folder "Balls" hoặc ngay trong Workspace
+    local target = Workspace:FindFirstChild(Config.BallName, true)
     
-    -- Quét mục tiêu liên tục
-    local target = GetClosestPlayer()
-    
-    if target then
-        -- Visual Feedback: Đổi màu khi bắt được địch
-        FOVCircle.Color = Color3.fromRGB(0, 255, 0) -- Xanh lá (Locked)
-        _G.MobileAimTarget = target -- Lưu vào biến toàn cục để Hook sử dụng
-    else
-        FOVCircle.Color = MobileConfig.FOV_Color -- Đỏ (Idle)
-        _G.MobileAimTarget = nil
-    end
-end)
-
--- // 6. SILENT AIM HOOK (MAGIC BULLET)
--- Phần này can thiệp vào game để bẻ cong đạn
--- Sử dụng kỹ thuật Hook an toàn cho Mobile (Delta/Fluxus support)
-
-local mt = getrawmetatable(game)
-local oldNamecall = mt.__namecall
-local oldIndex = mt.__index
-setreadonly(mt, false)
-
-mt.__namecall = newcclosure(function(self, ...)
-    local method = getnamecallmethod()
-    local args = {...}
-    
-    -- Chỉ hook khi có mục tiêu và chức năng bật
-    if MobileConfig.SilentAim.Enabled and _G.MobileAimTarget and _G.MobileAimTarget.Character then
-        if method == "FireServer" or method == "InvokeServer" then
-            -- Kiểm tra các RemoteEvent phổ biến (Da Hood, Arsenal, Phantom Forces, v.v.)
-            -- Logic chung: Tìm tham số Vector3 (vị trí bắn) và thay thế nó bằng đầu địch
-            
-            -- Tính toán vị trí dự đoán
-            local root = _G.MobileAimTarget.Character[MobileConfig.SilentAim.Part]
-            local vel = root.Velocity
-            local predPos = root.Position + (vel * MobileConfig.SilentAim.Prediction)
-            
-            -- Thay thế tham số
-            for i, v in pairs(args) do
-                if typeof(v) == "Vector3" then
-                    -- Thay thế vị trí chuột bằng vị trí đầu địch
-                    args[i] = predPos
-                elseif typeof(v) == "CFrame" then
-                     -- Một số game dùng CFrame
-                    args[i] = CFrame.new(Camera.CFrame.Position, predPos)
-                end
+    -- Nếu không tìm thấy theo tên, thử tìm part màu trắng hình cầu (Advanced logic)
+    if not target then
+        for _, v in ipairs(Workspace:GetDescendants()) do
+            if v:IsA("BasePart") and v.Name == "White" or (v:IsA("BasePart") and v.Color == Color3.new(1,1,1) and v.Shape == Enum.PartType.Ball) then
+                return v
             end
+        end
+    end
+    return target
+end
+
+local function CalculateTrajectory(startPos, direction)
+    local points = {startPos}
+    local currentPos = startPos
+    local currentDir = direction
+    
+    -- Raycast Params: Bỏ qua nhân vật và chính bi cái
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    local ignoreList = {LocalPlayer.Character, GetCueBall()}
+    params.FilterDescendantsInstances = ignoreList
+
+    for i = 1, Config.MaxBounces + 1 do
+        -- Bắn tia Raycast
+        local result = Workspace:Raycast(currentPos, currentDir * Config.MaxDistance, params)
+        
+        if result then
+            -- Nếu va chạm
+            table.insert(points, result.Position)
             
-            return oldNamecall(self, unpack(args))
+            -- Tính toán phản xạ: R = D - 2(D.N)N
+            local n = result.Normal
+            local d = currentDir
+            local reflect = d - (2 * d:Dot(n) * n)
+            
+            -- Cập nhật vị trí và hướng mới cho lần lặp sau
+            currentDir = reflect
+            -- Dịch chuyển điểm bắt đầu ra xa bề mặt một chút để tránh kẹt tia
+            currentPos = result.Position + (reflect * 0.1)
+        else
+            -- Nếu không va chạm gì, vẽ tia dài ra vô tận (trong tầm MaxDistance)
+            table.insert(points, currentPos + (currentDir * Config.MaxDistance))
+            break
         end
     end
     
-    return oldNamecall(self, ...)
-end)
+    return points
+end
 
--- Hook Index (Dành cho game cũ dùng Mouse.Hit)
-mt.__index = newcclosure(function(self, k)
-    if k == "Hit" and MobileConfig.SilentAim.Enabled and _G.MobileAimTarget and _G.MobileAimTarget.Character then
-        local root = _G.MobileAimTarget.Character[MobileConfig.SilentAim.Part]
-        local vel = root.Velocity
-        local predPos = root.Position + (vel * MobileConfig.SilentAim.Prediction)
+--// 6. MAIN LOOP (VÒNG LẶP CHÍNH) //--
+
+Calibration:Init() -- Khởi tạo UI lỗ
+
+RunService.RenderStepped:Connect(function()
+    DrawLib:Clear() -- Xóa đường cũ mỗi khung hình
+    
+    local cueBall = GetCueBall()
+    if not cueBall then return end
+    
+    -- Lấy hướng Camera để làm hướng đánh
+    -- Game bida trên mobile thường đánh theo hướng nhìn Camera
+    local camDir = Camera.CFrame.LookVector
+    -- Ép vector xuống mặt phẳng ngang (bỏ qua trục Y cao thấp)
+    local aimDir = Vector3.new(camDir.X, 0, camDir.Z).Unit
+    
+    -- Tính toán đường đi
+    local pathPoints = CalculateTrajectory(cueBall.Position, aimDir)
+    
+    -- Vẽ đường đi
+    for i = 1, #pathPoints - 1 do
+        local p1 = pathPoints[i]
+        local p2 = pathPoints[i+1]
         
-        -- Trả về CFrame giả nhắm vào địch
-        return CFrame.new(predPos)
+        -- Chuyển tọa độ 3D thế giới -> 2D màn hình
+        local pos1, vis1 = Camera:WorldToViewportPoint(p1)
+        local pos2, vis2 = Camera:WorldToViewportPoint(p2)
+        
+        if vis1 or vis2 then -- Chỉ vẽ nếu ít nhất 1 điểm nằm trong màn hình
+            local vec1 = Vector2.new(pos1.X, pos1.Y)
+            local vec2 = Vector2.new(pos2.X, pos2.Y)
+            
+            -- Đoạn đầu tiên màu Trắng, các đoạn nảy sau màu Xanh
+            local color = (i == 1) and Config.LineColor or Config.BounceColor
+            
+            DrawLib:DrawLine(vec1, vec2, color)
+        end
     end
-    
-    -- Hook Target (Dành cho game check Mouse.Target)
-    if k == "Target" and MobileConfig.SilentAim.Enabled and _G.MobileAimTarget and _G.MobileAimTarget.Character then
-        return _G.MobileAimTarget.Character[MobileConfig.SilentAim.Part]
-    end
-    
-    return oldIndex(self, k)
 end)
 
-setreadonly(mt, true)
-
--- // 7. THÔNG BÁO KHỞI ĐỘNG
-game:GetService("StarterGui"):SetCore("SendNotification", {
-    Title = "Mobile Aim V2";
-    Text = "Active! FOV: " .. MobileConfig.FOV_Radius;
-    Duration = 3;
-})
+print("✅ Delta Billiard Script Loaded!")
