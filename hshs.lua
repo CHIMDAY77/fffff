@@ -1,286 +1,252 @@
---
-    2. Visuals: Tạo bóng mờ (Ghost Trail) dùng Highlight Instance tối ưu GPU.[2]
-    3. UI: Giao diện Fluent Design tinh tế, có nút bật/tắt riêng cho Mobile.
+--[[ 
+    Mobile Ghost Trail Visual FX Script (Delta X Fixed)
+    Fixes: Archivable property, UI Parenting, Mobile Touch Input
 ]]
 
-local Services = {
-    Players = game:GetService("Players"),
-    RunService = game:GetService("RunService"),
-    TweenService = game:GetService("TweenService"),
-    Workspace = game:GetService("Workspace"),
-    CoreGui = game:GetService("CoreGui"),
-    Debris = game:GetService("Debris")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+
+local Player = Players.LocalPlayer
+local Character = Player.Character or Player.CharacterAdded:Wait()
+local Camera = workspace.CurrentCamera
+
+-- --- CẤU HÌNH (SETTINGS) ---
+local Settings = {
+    Enabled = false,
+    Interval = 0.1, 
+    FadeTime = 0.5, 
+    Color = Color3.fromRGB(100, 255, 255), 
+    TransparencyStart = 0.6, 
+    Material = Enum.Material.ForceField 
 }
 
-local LocalPlayer = Services.Players.LocalPlayer
-local Camera = Services.Workspace.CurrentCamera
+-- --- UI SETUP (DELTA X OPTIMIZED) ---
+-- Xóa UI cũ nếu có để tránh trùng lặp khi chạy lại script
+if Player.PlayerGui:FindFirstChild("GhostFX_GUI") then
+    Player.PlayerGui.GhostFX_GUI:Destroy()
+end
+if CoreGui:FindFirstChild("GhostFX_GUI") then
+    CoreGui.GhostFX_GUI:Destroy()
+end
 
--- // CẤU HÌNH TRẠNG THÁI (STATE CONFIG) //
-getgenv().Config = {
-    Desync = {
-        Enabled = false,
-        Intensity = 25000, -- Ngưỡng vận tốc gây lag server
-        Randomize = true,  -- Random hướng để khó bị anticheat bắt
-        VisualizeHitbox = false -- (Tùy chọn nâng cao)
-    },
-    Visuals = {
-        GhostTrail = false,
-        Color = Color3.fromRGB(0, 255, 255), -- Màu Cyan mặc định
-        Transparency = 0.5,
-        Duration = 0.5, -- Thời gian bóng tồn tại
-        RefreshRate = 0.15 -- Tần suất tạo bóng (Giảm số này nếu máy mạnh)
-    }
-}
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "GhostFX_GUI"
+ScreenGui.ResetOnSpawn = false -- Giữ UI khi chết
 
--- // TẢI THƯ VIỆN UI (FLUENT) [3] //
-local Fluent = loadstring(game:HttpGet("[https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua](https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua)"))()
-local SaveManager = loadstring(game:HttpGet("[https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua](https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua)"))()
-local InterfaceManager = loadstring(game:HttpGet("[https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua](https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua)"))()
+-- Delta X hỗ trợ gethui tốt nhất, nếu không thì dùng PlayerGui cho an toàn
+if gethui then
+    ScreenGui.Parent = gethui()
+elseif syn and syn.protect_gui then 
+    syn.protect_gui(ScreenGui)
+    ScreenGui.Parent = CoreGui
+else
+    ScreenGui.Parent = Player:WaitForChild("PlayerGui")
+end
 
-local Window = Fluent:CreateWindow({
-    Title = "Delta X Arena",
-    SubTitle = "Mobile Desync",
-    TabWidth = 160,
-    Size = UDim2.fromOffset(580, 460), -- Kích thước vừa phải cho tablet/điện thoại ngang
-    Acrylic = false, -- Tắt Acrylic để giảm lag trên mobile
-    Theme = "Dark",
-    MinimizeKey = Enum.KeyCode.LeftControl
-})
+-- 1. Nút Bật/Tắt Menu
+local ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Name = "ToggleBtn"
+ToggleBtn.Parent = ScreenGui
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+ToggleBtn.Position = UDim2.new(0.05, 0, 0.4, 0)
+ToggleBtn.Size = UDim2.new(0, 50, 0, 50)
+ToggleBtn.Font = Enum.Font.GothamBold
+ToggleBtn.Text = "FX"
+ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleBtn.TextSize = 20
+ToggleBtn.BorderSizePixel = 0
+ToggleBtn.AutoButtonColor = true
 
--- // MODULE 1: MOBILE TOGGLE BUTTON (NÚT BẬT TẮT UI) //
--- Vì mobile không có phím Ctrl phải, ta tạo một nút ảo trên màn hình
-local function CreateMobileButton()
-    local ScreenGui = Instance.new("ScreenGui")
-    ScreenGui.Name = "DeltaMobileControls"
-    -- Cố gắng parent vào CoreGui để không bị game xóa, nếu không thì vào PlayerGui
-    pcall(function() ScreenGui.Parent = Services.CoreGui end)
-    if not ScreenGui.Parent then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+local UICornerBtn = Instance.new("UICorner")
+UICornerBtn.CornerRadius = UDim.new(1, 0)
+UICornerBtn.Parent = ToggleBtn
 
-    local ToggleBtn = Instance.new("TextButton")
-    ToggleBtn.Name = "ToggleUI"
-    ToggleBtn.Size = UDim2.fromOffset(50, 50)
-    ToggleBtn.Position = UDim2.new(0.9, -60, 0.1, 0) -- Góc trên bên phải, cách lề
-    ToggleBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    ToggleBtn.Text = "UI"
-    ToggleBtn.Font = Enum.Font.GothamBold
-    ToggleBtn.TextSize = 14
-    ToggleBtn.BackgroundTransparency = 0.2
-    ToggleBtn.Parent = ScreenGui
+local UIStrokeBtn = Instance.new("UIStroke")
+UIStrokeBtn.Parent = ToggleBtn
+UIStrokeBtn.Color = Color3.fromRGB(100, 255, 255)
+UIStrokeBtn.Thickness = 2
+UIStrokeBtn.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 
-    -- Bo tròn nút
-    local Corner = Instance.new("UICorner")
-    Corner.CornerRadius = UDim.new(0, 10)
-    Corner.Parent = ToggleBtn
+-- 2. Bảng Menu Chính
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Parent = ScreenGui
+MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+MainFrame.Position = UDim2.new(0.5, -100, 0.5, -75)
+MainFrame.Size = UDim2.new(0, 220, 0, 180)
+MainFrame.Visible = false
+MainFrame.BorderSizePixel = 0
 
-    -- Viền nút
-    local Stroke = Instance.new("UIStroke")
-    Stroke.Color = Color3.fromRGB(0, 255, 213)
-    Stroke.Thickness = 2
-    Stroke.Parent = ToggleBtn
+local UICornerFrame = Instance.new("UICorner")
+UICornerFrame.CornerRadius = UDim.new(0, 10)
+UICornerFrame.Parent = MainFrame
 
-    -- Chức năng bật/tắt
-    ToggleBtn.MouseButton1Click:Connect(function()
-        Window:Minimize()
-    end)
+-- Tiêu đề
+local Title = Instance.new("TextLabel")
+Title.Parent = MainFrame
+Title.BackgroundTransparency = 1
+Title.Position = UDim2.new(0, 0, 0, 10)
+Title.Size = UDim2.new(1, 0, 0, 30)
+Title.Font = Enum.Font.GothamBold
+Title.Text = "VISUAL FX SETTINGS"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextSize = 16
+
+-- Nút kích hoạt
+local SwitchBtn = Instance.new("TextButton")
+SwitchBtn.Parent = MainFrame
+SwitchBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50) -- Đỏ
+SwitchBtn.Position = UDim2.new(0.1, 0, 0.4, 0)
+SwitchBtn.Size = UDim2.new(0.8, 0, 0, 40)
+SwitchBtn.Font = Enum.Font.Gotham
+SwitchBtn.Text = "Ghost Mode: OFF"
+SwitchBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+SwitchBtn.TextSize = 14
+SwitchBtn.AutoButtonColor = false
+
+local UICornerSwitch = Instance.new("UICorner")
+UICornerSwitch.CornerRadius = UDim.new(0, 8)
+UICornerSwitch.Parent = SwitchBtn
+
+-- Note
+local Note = Instance.new("TextLabel")
+Note.Parent = MainFrame
+Note.BackgroundTransparency = 1
+Note.Position = UDim2.new(0.05, 0, 0.7, 0)
+Note.Size = UDim2.new(0.9, 0, 0, 40)
+Note.Font = Enum.Font.Gotham
+Note.Text = "Fix for Delta X Mobile\nBật để tạo hiệu ứng bóng mờ."
+Note.TextColor3 = Color3.fromRGB(150, 150, 150)
+Note.TextSize = 12
+Note.TextWrapped = true
+
+-- --- CHỨC NĂNG KÉO THẢ (Fixed Logic) ---
+local dragging, dragInput, dragStart, startPos
+
+local function update(input)
+    local delta = input.Position - dragStart
+    MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+end
+
+MainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+        
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+MainFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        update(input)
+    end
+end)
+
+-- --- LOGIC HIỆU ỨNG (DELTA FIXED) ---
+
+local function CreateGhost()
+    -- Kiểm tra kỹ Character và RootPart để tránh crash
+    if not Character or not Character.Parent then return end
+    local HRP = Character:FindFirstChild("HumanoidRootPart")
+    if not HRP then return end
     
-    -- Cho phép kéo nút này đi chỗ khác (Mobile Drag) [4]
-    local dragging, dragInput, dragStart, startPos
-    ToggleBtn.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = true
-            dragStart = input.Position
-            startPos = ToggleBtn.Position
+    -- Chỉ tạo bóng nếu đang di chuyển (Tối ưu hiệu năng mobile)
+    if HRP.Velocity.Magnitude < 0.5 then return end
+
+    -- [FIX QUAN TRỌNG] Bật Archivable để cho phép Clone
+    Character.Archivable = true 
+
+    local GhostModel = Instance.new("Model")
+    GhostModel.Name = "GhostFX"
+    
+    for _, part in pairs(Character:GetChildren()) do
+        -- Lọc bỏ HumanoidRootPart và các phần không nhìn thấy
+        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" and part.Transparency < 1 then
             
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+            -- Sử dụng pcall để tránh lỗi khi clone MeshPart phức tạp trên mobile
+            local success, GhostPart = pcall(function()
+                return part:Clone()
             end)
-        end
-    end)
-    
-    ToggleBtn.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement then
-            dragInput = input
-        end
-    end)
-    
-    Services.UserInputService.InputChanged:Connect(function(input)
-        if input == dragInput and dragging then
-            local delta = input.Position - dragStart
-            ToggleBtn.Position = UDim2.new(
-                startPos.X.Scale, startPos.X.Offset + delta.X,
-                startPos.Y.Scale, startPos.Y.Offset + delta.Y
-            )
-        end
-    end)
-end
 
-CreateMobileButton()
-
--- // MODULE 2: DESYNC ENGINE //
--- Logic: Thay đổi Velocity cực nhanh để đánh lừa server (Server thấy đi xa, Client thấy bình thường)
-local function StartDesync()
-    Services.RunService.Heartbeat:Connect(function()
-        if not getgenv().Config.Desync.Enabled then return end
-        
-        local char = LocalPlayer.Character
-        local root = char and char:FindFirstChild("HumanoidRootPart")
-        
-        if root then
-            local originalVel = root.AssemblyLinearVelocity
-            
-            -- Tạo vector vận tốc ảo [1]
-            local intensity = getgenv().Config.Desync.Intensity
-            local x = getgenv().Config.Desync.Randomize and math.random(-2000, 2000) or 0
-            local z = getgenv().Config.Desync.Randomize and math.random(-2000, 2000) or 0
-            
-            -- Gửi vận tốc ảo lên server
-            root.AssemblyLinearVelocity = Vector3.new(x, intensity, z)
-            
-            -- Khôi phục vận tốc thật ngay lập tức để Client không bị giật (RenderStepped chạy sau Heartbeat)
-            Services.RunService.RenderStepped:Wait()
-            root.AssemblyLinearVelocity = originalVel
+            if success and GhostPart then
+                GhostPart.Parent = GhostModel
+                GhostPart.Anchored = true
+                GhostPart.CanCollide = false
+                GhostPart.CFrame = part.CFrame
+                GhostPart.Material = Settings.Material
+                GhostPart.Color = Settings.Color
+                GhostPart.Transparency = Settings.TransparencyStart
+                
+                -- Xóa script, âm thanh, hiệu ứng hạt bên trong part
+                for _, child in pairs(GhostPart:GetChildren()) do
+                    if not child:IsA("SpecialMesh") then
+                        child:Destroy()
+                    end
+                end
+                
+                -- Tween mờ dần
+                local tweenInfo = TweenInfo.new(Settings.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+                local tween = TweenService:Create(GhostPart, tweenInfo, {Transparency = 1})
+                tween:Play()
+            end
         end
+    end
+    
+    GhostModel.Parent = workspace
+    
+    -- Dọn dẹp
+    task.delay(Settings.FadeTime, function()
+        if GhostModel then GhostModel:Destroy() end
     end)
 end
 
-StartDesync()
-
--- // MODULE 3: GHOST TRAIL VISUALIZER (High Performance) //
--- Sử dụng Highlight Instance thay vì clone từng part để tối ưu cho Mobile GPU [5, 2]
-local function SpawnGhost()
-    local char = LocalPlayer.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
-    
-    -- Chỉ tạo bóng khi nhân vật di chuyển
-    if char.HumanoidRootPart.AssemblyLinearVelocity.Magnitude < 2 then return end
-
-    char.Archivable = true
-    local ghost = char:Clone()
-    ghost.Name = "VisualGhost"
-    
-    -- Dọn dẹp clone: Xóa script, xóa phụ kiện rườm rà nếu cần
-    for _, child in ipairs(ghost:GetDescendants()) do
-        if child:IsA("BasePart") then
-            child.Anchored = true
-            child.CanCollide = false
-            child.Massless = true
-            child.Material = Enum.Material.ForceField -- Hiệu ứng đẹp nhẹ
-            child.CastShadow = false
-        elseif child:IsA("Script") or child:IsA("LocalScript") or child:IsA("Sound") or child:IsA("BillboardGui") then
-            child:Destroy()
+-- Vòng lặp
+local LastTime = 0
+RunService.Heartbeat:Connect(function(dt)
+    if Settings.Enabled then
+        local Now = tick()
+        if Now - LastTime >= Settings.Interval then
+            CreateGhost()
+            LastTime = Now
         end
     end
-    
-    -- Áp dụng Highlight
-    local hl = Instance.new("Highlight")
-    hl.FillColor = getgenv().Config.Visuals.Color
-    hl.OutlineColor = Color3.new(1, 1, 1)
-    hl.FillTransparency = getgenv().Config.Visuals.Transparency
-    hl.OutlineTransparency = 0.5
-    hl.Parent = ghost
-    
-    ghost.Parent = Services.Workspace
-    ghost:PivotTo(char:GetPivot()) -- Đặt vị trí khớp với nhân vật
-    
-    -- Hiệu ứng biến mất dần
-    local tweenInfo = TweenInfo.new(getgenv().Config.Visuals.Duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-    local tween = Services.TweenService:Create(hl, tweenInfo, {FillTransparency = 1, OutlineTransparency = 1})
-    tween:Play()
-    
-    Services.Debris:AddItem(ghost, getgenv().Config.Visuals.Duration)
-end
+end)
 
--- Vòng lặp tạo bóng (Tách biệt khỏi RenderStepped để không tụt FPS)
-task.spawn(function()
-    while true do
-        if getgenv().Config.Visuals.GhostTrail then
-            pcall(SpawnGhost)
-        end
-        task.wait(getgenv().Config.Visuals.RefreshRate)
+-- --- XỬ LÝ SỰ KIỆN UI ---
+
+-- Sử dụng Activated thay vì MouseButton1Click để nhạy hơn trên màn hình cảm ứng
+ToggleBtn.Activated:Connect(function()
+    MainFrame.Visible = not MainFrame.Visible
+end)
+
+SwitchBtn.Activated:Connect(function()
+    Settings.Enabled = not Settings.Enabled
+    
+    if Settings.Enabled then
+        SwitchBtn.Text = "Ghost Mode: ON"
+        SwitchBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    else
+        SwitchBtn.Text = "Ghost Mode: OFF"
+        SwitchBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
     end
 end)
 
--- // XÂY DỰNG GIAO DIỆN (TABS & ELEMENTS) //
-
-local Tabs = {
-    Combat = Window:AddTab({ Title = "Combat", Icon = "swords" }),
-    Visuals = Window:AddTab({ Title = "Visuals", Icon = "eye" }),
-    Settings = Window:AddTab({ Title = "Settings", Icon = "settings" })
-}
-
--- Tab Combat
-local DesyncGroup = Tabs.Combat:AddSection("Desync Logic")
-
-local ToggleDesync = DesyncGroup:AddToggle("DesyncState", {Title = "Enable Desync", Default = false })
-ToggleDesync:OnChanged(function()
-    getgenv().Config.Desync.Enabled = ToggleDesync.Value
-    if ToggleDesync.Value then
-        Fluent:Notify({Title = "Desync", Content = "Đã kích hoạt chế độ Desync", Duration = 3})
-    end
+-- Cập nhật Character khi respawn
+Player.CharacterAdded:Connect(function(newChar)
+    Character = newChar
 end)
-
-DesyncGroup:AddSlider("DesyncIntensity", {
-    Title = "Desync Intensity",
-    Description = "Độ mạnh của việc ngắt đồng bộ (Cao = Lag hơn)",
-    Default = 25000,
-    Min = 5000,
-    Max = 50000,
-    Rounding = 0,
-    Callback = function(Value)
-        getgenv().Config.Desync.Intensity = Value
-    end
-})
-
-DesyncGroup:AddToggle("RandomizeVec", {Title = "Randomize Vectors", Default = true, Description = "Làm quỹ đạo khó đoán hơn" })
-:OnChanged(function(Value)
-    getgenv().Config.Desync.Randomize = Value
-end)
-
--- Tab Visuals
-local VisualGroup = Tabs.Visuals:AddSection("Ghost Trail")
-
-local ToggleGhost = VisualGroup:AddToggle("GhostState", {Title = "Enable Ghost Trail", Default = false })
-ToggleGhost:OnChanged(function()
-    getgenv().Config.Visuals.GhostTrail = ToggleGhost.Value
-end)
-
-VisualGroup:AddColorpicker("GhostColor", {
-    Title = "Trail Color",
-    Default = getgenv().Config.Visuals.Color,
-    Callback = function(Value)
-        getgenv().Config.Visuals.Color = Value
-    end
-})
-
-VisualGroup:AddSlider("TrailDuration", {
-    Title = "Duration (Seconds)",
-    Default = 0.5,
-    Min = 0.1,
-    Max = 2.0,
-    Rounding = 1,
-    Callback = function(Value)
-        getgenv().Config.Visuals.Duration = Value
-    end
-})
-
--- Tab Settings
-Tabs.Settings:AddButton({
-    Title = "Unload Script",
-    Description = "Xóa giao diện và dừng script",
-    Callback = function()
-        Window:Destroy()
-        getgenv().Config.Desync.Enabled = false
-        getgenv().Config.Visuals.GhostTrail = false
-        -- Xóa nút mobile
-        local btn = Services.CoreGui:FindFirstChild("DeltaMobileControls")
-        if btn then btn:Destroy() end
-    end
-})
-
-Window:SelectTab(1)
-Fluent:Notify({
-    Title = "Delta Script Loaded",
-    Content = "Sẵn sàng chiến đấu! Nhấn nút 'UI' để ẩn menu.",
-    Duration = 5
-})
