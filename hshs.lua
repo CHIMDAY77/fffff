@@ -1,15 +1,12 @@
 --[[
-    ADVANCED COMBAT DESYNC: VELOCITY SPLIT & VISUAL CHAOS
-    Target: Delta X Mobile
-    Technique: 
-      1. Velocity Spoofing (Confuse Server Prediction)
-      2. CFrame Desynchronization (Split Render vs Physics)
-      3. Visual Ghosting (Distraction)
+    ULTIMATE COMBAT DESYNC V7 - GOD MODE "TÁCH XÁC"
+    Platform: Delta X Mobile Optimized
+    Mechanism: Split-Frame CFrame Override + Custom Movement Handler
+    Result: Visual Body moves freely, Actual Hitbox stays anchored.
 ]]
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
@@ -19,74 +16,63 @@ local HRP = Character:WaitForChild("HumanoidRootPart")
 local Humanoid = Character:WaitForChild("Humanoid")
 local Camera = Workspace.CurrentCamera
 
--- --- CẤU HÌNH (CONFIG) ---
+-- --- CẤU HÌNH ---
 local Config = {
-    DesyncSpeed = 1.0,        -- Tốc độ di chuyển khi Desync (16 * n)
-    GhostInterval = 0.1,      -- Tốc độ tạo bóng
-    GhostColor = Color3.fromRGB(0, 255, 255), -- Màu Cyan
-    VelocityVector = Vector3.new(0, 10000, 0) -- Vector gây nhiễu Server
+    MoveSpeed = 20, -- Tốc độ di chuyển khi bật God Mode (Mặc định game là 16)
+    JumpPower = 50  -- Lực nhảy (Nếu game cho phép nhảy)
 }
 
--- Biến trạng thái
-local State = {
-    Enabled = false,
-    ClientCFrame = nil,
-    LastGhost = 0
-}
+-- Biến hệ thống
+local DesyncEnabled = false
+local HitboxAnchorCFrame = nil -- Vị trí xác thật (Hitbox)
+local VisualCFrame = nil       -- Vị trí hình ảnh (Linh hồn)
 
--- --- PHẦN 1: UI LIBRARY TỐI ƯU CHO DELTA (TOUCH) ---
-
--- Dọn dẹp UI cũ
-if LocalPlayer.PlayerGui:FindFirstChild("DesyncInterface") then
-    LocalPlayer.PlayerGui.DesyncInterface:Destroy()
+-- --- UI SETUP (DELTA X) ---
+if LocalPlayer.PlayerGui:FindFirstChild("GodModeUI") then
+    LocalPlayer.PlayerGui.GodModeUI:Destroy()
 end
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "DesyncInterface"
+ScreenGui.Name = "GodModeUI"
 ScreenGui.ResetOnSpawn = false
--- Ưu tiên gethui cho Executor đời mới
 if gethui then ScreenGui.Parent = gethui() else ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
--- Container chính (Nút tròn)
+-- Nút Icon (Draggable)
 local MainBtn = Instance.new("TextButton")
-MainBtn.Name = "ToggleBtn"
-MainBtn.Size = UDim2.new(0, 55, 0, 55)
-MainBtn.Position = UDim2.new(0.05, 0, 0.45, 0) -- Vị trí ngón cái trái
+MainBtn.Name = "GodBtn"
+MainBtn.Size = UDim2.new(0, 65, 0, 65)
+MainBtn.Position = UDim2.new(0.05, 0, 0.4, 0)
 MainBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-MainBtn.Text = "⚡"
-MainBtn.TextSize = 24
+MainBtn.Text = "🛡️"
+MainBtn.TextSize = 30
 MainBtn.AutoButtonColor = true
 MainBtn.Parent = ScreenGui
 
--- Bo tròn & Viền
 local Corner = Instance.new("UICorner")
 Corner.CornerRadius = UDim.new(1, 0)
 Corner.Parent = MainBtn
 
 local Stroke = Instance.new("UIStroke")
 Stroke.Color = Color3.fromRGB(255, 255, 255)
-Stroke.Thickness = 2.5
+Stroke.Thickness = 3
 Stroke.Parent = MainBtn
 
--- Label trạng thái
-local StatusTxt = Instance.new("TextLabel")
-StatusTxt.Size = UDim2.new(2, 0, 0.3, 0)
-StatusTxt.Position = UDim2.new(-0.5, 0, 1.15, 0)
-StatusTxt.BackgroundTransparency = 1
-StatusTxt.Text = "SYNCED"
-StatusTxt.TextColor3 = Color3.fromRGB(200, 200, 200)
-StatusTxt.Font = Enum.Font.GothamBold
-StatusTxt.TextSize = 12
-StatusTxt.TextStrokeTransparency = 0.5
-StatusTxt.Parent = MainBtn
+local Status = Instance.new("TextLabel")
+Status.Size = UDim2.new(2, 0, 0.3, 0)
+Status.Position = UDim2.new(-0.5, 0, 1.15, 0)
+Status.BackgroundTransparency = 1
+Status.Text = "SAFE"
+Status.TextColor3 = Color3.fromRGB(0, 255, 0)
+Status.Font = Enum.Font.GothamBold
+Status.TextSize = 14
+Status.TextStrokeTransparency = 0.8
+Status.Parent = MainBtn
 
--- --- LOGIC KÉO THẢ (DRAG) ---
+-- --- LOGIC KÉO THẢ ---
 local dragging, dragInput, dragStart, startPos
 MainBtn.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true
-        dragStart = input.Position
-        startPos = MainBtn.Position
+        dragging = true; dragStart = input.Position; startPos = MainBtn.Position
         input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
     end
 end)
@@ -100,143 +86,116 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
--- --- PHẦN 2: VISUAL FX (BÓNG MỜ/AFTERIMAGE) ---
+-- --- LOGIC GOD MODE CHÍNH ---
 
-local function SpawnGhost(cf)
-    if not Character then return end
-    Character.Archivable = true -- Bắt buộc cho Clone
-    
-    local GhostModel = Instance.new("Model")
-    GhostModel.Name = "DesyncGhost"
-    
-    -- Clone Visuals
-    for _, v in pairs(Character:GetChildren()) do
-        if v:IsA("BasePart") and v.Name ~= "HumanoidRootPart" and v.Transparency < 1 then
-            local p = v:Clone()
-            p.Parent = GhostModel
-            p.CFrame = v.CFrame -- Clone tại vị trí hiển thị hiện tại
-            p.Anchored = true
-            p.CanCollide = false
-            p.Material = Enum.Material.ForceField -- Hiệu ứng điện tử
-            p.Color = Config.GhostColor
-            p.Transparency = 0.6
-            
-            -- Xóa tạp chất
-            for _, c in pairs(p:GetChildren()) do 
-                if not c:IsA("SpecialMesh") then c:Destroy() end 
-            end
-            
-            -- Hiệu ứng biến mất
-            TweenService:Create(p, TweenInfo.new(0.5), {Transparency = 1, Color = Color3.new(1,1,1)}):Play()
-        end
-    end
-    
-    GhostModel.Parent = Workspace
-    task.delay(0.5, function() GhostModel:Destroy() end)
+local function CreateMarker(cf)
+    if Workspace:FindFirstChild("HitboxMarker") then Workspace.HitboxMarker:Destroy() end
+    local p = Instance.new("Part")
+    p.Name = "HitboxMarker"
+    p.Size = Vector3.new(2, 6, 2)
+    p.CFrame = cf
+    p.Anchored = true
+    p.CanCollide = false
+    p.Transparency = 0.4
+    p.Color = Color3.fromRGB(255, 0, 0) -- Cột đỏ = Điểm yếu
+    p.Material = Enum.Material.Neon
+    p.Parent = Workspace
 end
 
--- --- PHẦN 3: CORE DESYNC LOGIC (VELOCITY MANIPULATION) ---
-
-local function ToggleDesync()
-    State.Enabled = not State.Enabled
+local function ToggleGod()
+    DesyncEnabled = not DesyncEnabled
     
-    if State.Enabled then
-        -- KÍCH HOẠT DESYNC
-        Stroke.Color = Color3.fromRGB(0, 255, 255) -- Cyan
-        MainBtn.BackgroundColor3 = Color3.fromRGB(0, 50, 50)
-        StatusTxt.Text = "DESYNC ACTIVE"
-        StatusTxt.TextColor3 = Color3.fromRGB(0, 255, 255)
+    if DesyncEnabled then
+        -- BẬT GOD MODE
+        Status.Text = "GOD ACTIVE"
+        Status.TextColor3 = Color3.fromRGB(255, 50, 50)
+        Stroke.Color = Color3.fromRGB(255, 50, 50)
+        MainBtn.BackgroundColor3 = Color3.fromRGB(50, 10, 10)
         
-        -- Snapshot vị trí bắt đầu
-        State.ClientCFrame = HRP.CFrame
+        -- 1. Ghim vị trí Hitbox tại chỗ đứng hiện tại
+        HitboxAnchorCFrame = HRP.CFrame
+        VisualCFrame = HRP.CFrame
         
-        -- Ngắt vật lý (Physics Edge Case: PlatformStand ngăn server can thiệp chuyển động)
+        -- Tạo cột đánh dấu điểm yếu
+        CreateMarker(HitboxAnchorCFrame)
+        
+        -- 2. Ngắt hệ thống vật lý mặc định (Fix lỗi kẹt chân)
         Humanoid.PlatformStand = true
         
-        -- Tắt va chạm để tránh bị kẹt khi desync
+        -- Tắt va chạm để đi xuyên tường
         for _, v in pairs(Character:GetDescendants()) do
-            if v:IsA("BasePart") then v.CanCollide = false end
+           if v:IsA("BasePart") then v.CanCollide = false end
         end
         
     else
-        -- TẮT DESYNC
+        -- TẮT GOD MODE
+        Status.Text = "SAFE"
+        Status.TextColor3 = Color3.fromRGB(0, 255, 0)
         Stroke.Color = Color3.fromRGB(255, 255, 255)
         MainBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-        StatusTxt.Text = "SYNCED"
-        StatusTxt.TextColor3 = Color3.fromRGB(200, 200, 200)
         
+        if Workspace:FindFirstChild("HitboxMarker") then Workspace.HitboxMarker:Destroy() end
+        
+        -- Hồi phục vật lý
         Humanoid.PlatformStand = false
-        HRP.AssemblyLinearVelocity = Vector3.zero -- Reset vận tốc
+        HRP.AssemblyLinearVelocity = Vector3.zero
         
-        -- Đồng bộ lại vị trí
-        HRP.CFrame = State.ClientCFrame
+        -- Dịch chuyển về vị trí hình ảnh đang đứng
+        HRP.CFrame = VisualCFrame
         
         -- Bật lại va chạm
         for _, v in pairs(Character:GetDescendants()) do
-            if v:IsA("BasePart") then v.CanCollide = true end
+           if v:IsA("BasePart") then v.CanCollide = true end
         end
     end
 end
 
--- --- LOOPS (TRÁI TIM CỦA DESYNC) ---
+-- --- VÒNG LẶP XỬ LÝ (BÍ MẬT CỦA DESYNC) ---
 
--- 1. Heartbeat (Physics Loop): Thao tác Server
+-- 1. HEARTBEAT (Gửi dữ liệu lên Server)
 RunService.Heartbeat:Connect(function(dt)
-    if State.Enabled and HRP and Character then
-        -- KỸ THUẬT: VELOCITY SPOOFING
-        -- Thay vì để Velocity = 0, ta set nó thành một giá trị cực lớn hướng lên trên
-        -- Server sẽ bối rối trong việc nội suy (interpolate) vị trí thực tế -> Hitbox bị lag lại
-        HRP.AssemblyLinearVelocity = Config.VelocityVector 
+    if DesyncEnabled and HRP and Character then
+        -- ÉP SERVER NHÌN THẤY BẠN ĐỨNG IM TẠI CỘT ĐỎ
+        HRP.AssemblyLinearVelocity = Vector3.zero -- Triệt tiêu vận tốc để không bị giật
         HRP.AssemblyAngularVelocity = Vector3.zero
-        
-        -- Có thể thêm logic giữ Hitbox Server tại một chỗ cũ (Lag switch simulation)
-        -- Nhưng Velocity Spoofing thường hiệu quả hơn để né đạn (Bullet miss)
+        HRP.CFrame = HitboxAnchorCFrame -- Khóa vị trí Hitbox
     end
 end)
 
--- 2. RenderStepped (Visual Loop): Thao tác Client
+-- 2. RENDERSTEPPED (Xử lý hình ảnh và di chuyển Client)
 RunService.RenderStepped:Connect(function(dt)
-    if State.Enabled and HRP and Character then
-        -- TÍNH TOÁN DI CHUYỂN CLIENT (Tự code lại movement)
+    if DesyncEnabled and HRP and Character and Humanoid then
+        -- HỆ THỐNG DI CHUYỂN THỦ CÔNG (Fix lỗi kẹt trên Mobile)
+        -- Lấy hướng từ Joystick ảo
         local moveDir = Humanoid.MoveDirection
         
+        -- Tính toán vị trí mới dựa trên tốc độ Config
+        local newPos = VisualCFrame.Position
         if moveDir.Magnitude > 0 then
-            -- Di chuyển CFrame độc lập với Server
-            local newPos = State.ClientCFrame.Position + (moveDir * (16 * Config.DesyncSpeed * dt))
-            
-            -- Xoay mặt theo hướng đi
-            local lookAt = State.ClientCFrame.Position + moveDir
-            State.ClientCFrame = CFrame.new(newPos, lookAt)
-            
-            -- TẠO GHOST TRAIL (Gây nhiễu thị giác)
-            if tick() - State.LastGhost > Config.GhostInterval then
-                SpawnGhost(State.ClientCFrame)
-                State.LastGhost = tick()
-            end
+             newPos = newPos + (moveDir * Config.MoveSpeed * dt)
         end
         
-        -- ÉP HIỂN THỊ
-        -- Client nhìn thấy mình đang lướt mượt mà, nhưng Server thì thấy Velocity đang loạn xạ
-        HRP.CFrame = State.ClientCFrame
+        -- Xử lý nhảy thủ công (Nếu cần - thử nghiệm)
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) or Humanoid.Jump then
+             -- newPos = newPos + Vector3.new(0, Config.JumpPower * dt, 0) -- (Cần logic phức tạp hơn cho nhảy)
+        end
+
+        -- Cập nhật vị trí nhìn thấy, giữ độ cao Y ổn định hoặc theo địa hình nếu muốn
+        -- Ở đây giữ nguyên Y để lướt đi cho mượt
+        VisualCFrame = CFrame.new(Vector3.new(newPos.X, VisualCFrame.Y, newPos.Z), newPos + moveDir)
+        
+        -- ÉP MÀN HÌNH HIỂN THỊ VỊ TRÍ MỚI
+        HRP.CFrame = VisualCFrame
     end
 end)
 
--- --- INPUT HANDLER ---
+-- INPUT
+MainBtn.Activated:Connect(function() if not dragging then ToggleGod() end end)
 
--- Sử dụng Activated (Tối ưu cho Mobile Touch)
-MainBtn.Activated:Connect(function()
-    if not dragging then ToggleDesync() end
-end)
-
--- Phím tắt cho PC (nếu cần test)
-UserInputService.InputBegan:Connect(function(inp, gp)
-    if not gp and inp.KeyCode == Enum.KeyCode.B then ToggleDesync() end
-end)
-
--- Reset khi chết
+-- Reset
 LocalPlayer.CharacterAdded:Connect(function(newChar)
     Character = newChar
     HRP = Character:WaitForChild("HumanoidRootPart")
     Humanoid = Character:WaitForChild("Humanoid")
-    if State.Enabled then ToggleDesync() end -- Tắt để tránh lỗi spawn
+    if DesyncEnabled then ToggleGod() end
 end)
