@@ -1,8 +1,7 @@
 --[[
-    ULTIMATE COMBAT DESYNC V7 - GOD MODE "TÁCH XÁC"
-    Platform: Delta X Mobile Optimized
-    Mechanism: Split-Frame CFrame Override + Custom Movement Handler
-    Result: Visual Body moves freely, Actual Hitbox stays anchored.
+    GOD MODE V8 - DELTA X MOBILE FIX
+    Fix: "Frozen Character" issue on Mobile
+    Method: Physics State Override + Camera-based Movement
 ]]
 
 local Players = game:GetService("Players")
@@ -18,33 +17,33 @@ local Camera = Workspace.CurrentCamera
 
 -- --- CẤU HÌNH ---
 local Config = {
-    MoveSpeed = 20, -- Tốc độ di chuyển khi bật God Mode (Mặc định game là 16)
-    JumpPower = 50  -- Lực nhảy (Nếu game cho phép nhảy)
+    Speed = 1, -- Tốc độ di chuyển (1 = Bình thường, 2 = Nhanh)
+    FlyHeight = 0 -- Độ cao so với mặt đất (0 = đi bộ, >0 = bay)
 }
 
 -- Biến hệ thống
 local DesyncEnabled = false
-local HitboxAnchorCFrame = nil -- Vị trí xác thật (Hitbox)
-local VisualCFrame = nil       -- Vị trí hình ảnh (Linh hồn)
+local SafeSpotCFrame = nil
+local VisualCFrame = nil 
 
--- --- UI SETUP (DELTA X) ---
-if LocalPlayer.PlayerGui:FindFirstChild("GodModeUI") then
-    LocalPlayer.PlayerGui.GodModeUI:Destroy()
+-- --- UI SETUP (GỌN NHẸ) ---
+if LocalPlayer.PlayerGui:FindFirstChild("GodV8UI") then
+    LocalPlayer.PlayerGui.GodV8UI:Destroy()
 end
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "GodModeUI"
+ScreenGui.Name = "GodV8UI"
 ScreenGui.ResetOnSpawn = false
 if gethui then ScreenGui.Parent = gethui() else ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
--- Nút Icon (Draggable)
+-- Nút Bấm
 local MainBtn = Instance.new("TextButton")
-MainBtn.Name = "GodBtn"
-MainBtn.Size = UDim2.new(0, 65, 0, 65)
+MainBtn.Name = "MainBtn"
+MainBtn.Size = UDim2.new(0, 60, 0, 60)
 MainBtn.Position = UDim2.new(0.05, 0, 0.4, 0)
-MainBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-MainBtn.Text = "🛡️"
-MainBtn.TextSize = 30
+MainBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+MainBtn.Text = "🏃" -- Icon Chạy
+MainBtn.TextSize = 25
 MainBtn.AutoButtonColor = true
 MainBtn.Parent = ScreenGui
 
@@ -54,19 +53,18 @@ Corner.Parent = MainBtn
 
 local Stroke = Instance.new("UIStroke")
 Stroke.Color = Color3.fromRGB(255, 255, 255)
-Stroke.Thickness = 3
+Stroke.Thickness = 2
 Stroke.Parent = MainBtn
 
-local Status = Instance.new("TextLabel")
-Status.Size = UDim2.new(2, 0, 0.3, 0)
-Status.Position = UDim2.new(-0.5, 0, 1.15, 0)
-Status.BackgroundTransparency = 1
-Status.Text = "SAFE"
-Status.TextColor3 = Color3.fromRGB(0, 255, 0)
-Status.Font = Enum.Font.GothamBold
-Status.TextSize = 14
-Status.TextStrokeTransparency = 0.8
-Status.Parent = MainBtn
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Size = UDim2.new(2, 0, 0.3, 0)
+StatusLabel.Position = UDim2.new(-0.5, 0, 1.1, 0)
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Text = "OFF"
+StatusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+StatusLabel.Font = Enum.Font.GothamBold
+StatusLabel.TextSize = 14
+StatusLabel.Parent = MainBtn
 
 -- --- LOGIC KÉO THẢ ---
 local dragging, dragInput, dragStart, startPos
@@ -86,116 +84,107 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
--- --- LOGIC GOD MODE CHÍNH ---
+-- --- LOGIC XỬ LÝ DI CHUYỂN (MOVEMENT FIX) ---
 
-local function CreateMarker(cf)
-    if Workspace:FindFirstChild("HitboxMarker") then Workspace.HitboxMarker:Destroy() end
-    local p = Instance.new("Part")
-    p.Name = "HitboxMarker"
-    p.Size = Vector3.new(2, 6, 2)
-    p.CFrame = cf
-    p.Anchored = true
-    p.CanCollide = false
-    p.Transparency = 0.4
-    p.Color = Color3.fromRGB(255, 0, 0) -- Cột đỏ = Điểm yếu
-    p.Material = Enum.Material.Neon
-    p.Parent = Workspace
-end
-
-local function ToggleGod()
-    DesyncEnabled = not DesyncEnabled
+local function EnableGod()
+    DesyncEnabled = true
+    StatusLabel.Text = "GOD ON"
+    StatusLabel.TextColor3 = Color3.fromRGB(50, 255, 50)
+    MainBtn.BackgroundColor3 = Color3.fromRGB(0, 50, 0)
     
-    if DesyncEnabled then
-        -- BẬT GOD MODE
-        Status.Text = "GOD ACTIVE"
-        Status.TextColor3 = Color3.fromRGB(255, 50, 50)
-        Stroke.Color = Color3.fromRGB(255, 50, 50)
-        MainBtn.BackgroundColor3 = Color3.fromRGB(50, 10, 10)
-        
-        -- 1. Ghim vị trí Hitbox tại chỗ đứng hiện tại
-        HitboxAnchorCFrame = HRP.CFrame
-        VisualCFrame = HRP.CFrame
-        
-        -- Tạo cột đánh dấu điểm yếu
-        CreateMarker(HitboxAnchorCFrame)
-        
-        -- 2. Ngắt hệ thống vật lý mặc định (Fix lỗi kẹt chân)
-        Humanoid.PlatformStand = true
-        
-        -- Tắt va chạm để đi xuyên tường
-        for _, v in pairs(Character:GetDescendants()) do
-           if v:IsA("BasePart") then v.CanCollide = false end
-        end
-        
-    else
-        -- TẮT GOD MODE
-        Status.Text = "SAFE"
-        Status.TextColor3 = Color3.fromRGB(0, 255, 0)
-        Stroke.Color = Color3.fromRGB(255, 255, 255)
-        MainBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-        
-        if Workspace:FindFirstChild("HitboxMarker") then Workspace.HitboxMarker:Destroy() end
-        
-        -- Hồi phục vật lý
-        Humanoid.PlatformStand = false
-        HRP.AssemblyLinearVelocity = Vector3.zero
-        
-        -- Dịch chuyển về vị trí hình ảnh đang đứng
-        HRP.CFrame = VisualCFrame
-        
-        -- Bật lại va chạm
-        for _, v in pairs(Character:GetDescendants()) do
-           if v:IsA("BasePart") then v.CanCollide = true end
-        end
+    -- 1. Lưu vị trí núp (Safe Spot)
+    SafeSpotCFrame = HRP.CFrame
+    VisualCFrame = HRP.CFrame
+    
+    -- Marker
+    local m = Instance.new("Part")
+    m.Name = "HitboxMarker"
+    m.Size = Vector3.new(2,5,2)
+    m.CFrame = SafeSpotCFrame
+    m.Anchored = true
+    m.CanCollide = false
+    m.Transparency = 0.5
+    m.Color = Color3.fromRGB(255,0,0)
+    m.Parent = Workspace
+    
+    -- 2. Thay đổi trạng thái vật lý (Thay vì PlatformStand)
+    -- Giúp Joystick vẫn hoạt động
+    Humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+    
+    -- Tắt va chạm
+    for _, v in pairs(Character:GetDescendants()) do
+        if v:IsA("BasePart") then v.CanCollide = false end
     end
 end
 
--- --- VÒNG LẶP XỬ LÝ (BÍ MẬT CỦA DESYNC) ---
-
--- 1. HEARTBEAT (Gửi dữ liệu lên Server)
-RunService.Heartbeat:Connect(function(dt)
-    if DesyncEnabled and HRP and Character then
-        -- ÉP SERVER NHÌN THẤY BẠN ĐỨNG IM TẠI CỘT ĐỎ
-        HRP.AssemblyLinearVelocity = Vector3.zero -- Triệt tiêu vận tốc để không bị giật
-        HRP.AssemblyAngularVelocity = Vector3.zero
-        HRP.CFrame = HitboxAnchorCFrame -- Khóa vị trí Hitbox
+local function DisableGod()
+    DesyncEnabled = false
+    StatusLabel.Text = "OFF"
+    StatusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    MainBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    
+    if Workspace:FindFirstChild("HitboxMarker") then Workspace.HitboxMarker:Destroy() end
+    
+    -- Reset trạng thái
+    Humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+    
+    -- Dịch chuyển về vị trí Client
+    HRP.CFrame = VisualCFrame
+    HRP.AssemblyLinearVelocity = Vector3.zero
+    
+    for _, v in pairs(Character:GetDescendants()) do
+        if v:IsA("BasePart") then v.CanCollide = true end
     end
-end)
+end
 
--- 2. RENDERSTEPPED (Xử lý hình ảnh và di chuyển Client)
+-- --- CORE LOOP (KHẮC PHỤC LỖI ĐỨNG IM) ---
+
 RunService.RenderStepped:Connect(function(dt)
-    if DesyncEnabled and HRP and Character and Humanoid then
-        -- HỆ THỐNG DI CHUYỂN THỦ CÔNG (Fix lỗi kẹt trên Mobile)
-        -- Lấy hướng từ Joystick ảo
-        local moveDir = Humanoid.MoveDirection
+    if DesyncEnabled and Character and HRP and Humanoid then
+        -- 1. LIÊN TỤC FORCE TRẠNG THÁI PHYSICS (Để không bị server đè)
+        Humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+        Humanoid.WalkSpeed = 0 -- Tắt tốc độ mặc định để tự code di chuyển
         
-        -- Tính toán vị trí mới dựa trên tốc độ Config
-        local newPos = VisualCFrame.Position
+        -- 2. TÍNH TOÁN DI CHUYỂN THỦ CÔNG (JOYSTICK FIX)
+        local moveDir = Humanoid.MoveDirection -- Lấy hướng Joystick
+        local camCFrame = Camera.CFrame
+        
+        -- Nếu MoveDirection bị kẹt (bằng 0), thử dùng Camera LookVector nếu đang chạm màn hình (Optional)
+        
         if moveDir.Magnitude > 0 then
-             newPos = newPos + (moveDir * Config.MoveSpeed * dt)
+            -- Tính hướng đi dựa trên Camera
+            -- Vì Humanoid.MoveDirection đã tự tính theo Camera rồi, ta chỉ cần nhân tốc độ
+            local nextPos = VisualCFrame.Position + (moveDir * (16 * Config.Speed * dt))
+            
+            -- Giữ độ cao Y ổn định (Đi trên mặt đất) hoặc bay tùy chỉnh
+            -- Để đi bộ mượt, ta lấy Y của địa hình hoặc giữ nguyên Y cũ
+            nextPos = Vector3.new(nextPos.X, VisualCFrame.Y + Config.FlyHeight, nextPos.Z)
+            
+            -- Cập nhật VisualCFrame (Vị trí ảo)
+            VisualCFrame = CFrame.new(nextPos, nextPos + moveDir)
         end
         
-        -- Xử lý nhảy thủ công (Nếu cần - thử nghiệm)
-        if UserInputService:IsKeyDown(Enum.KeyCode.Space) or Humanoid.Jump then
-             -- newPos = newPos + Vector3.new(0, Config.JumpPower * dt, 0) -- (Cần logic phức tạp hơn cho nhảy)
-        end
-
-        -- Cập nhật vị trí nhìn thấy, giữ độ cao Y ổn định hoặc theo địa hình nếu muốn
-        -- Ở đây giữ nguyên Y để lướt đi cho mượt
-        VisualCFrame = CFrame.new(Vector3.new(newPos.X, VisualCFrame.Y, newPos.Z), newPos + moveDir)
-        
-        -- ÉP MÀN HÌNH HIỂN THỊ VỊ TRÍ MỚI
+        -- 3. ÉP HIỂN THỊ CLIENT
         HRP.CFrame = VisualCFrame
+        HRP.AssemblyLinearVelocity = Vector3.zero
     end
 end)
 
--- INPUT
-MainBtn.Activated:Connect(function() if not dragging then ToggleGod() end end)
+RunService.Heartbeat:Connect(function()
+    if DesyncEnabled and HRP then
+        -- 4. ÉP SERVER THẤY HITBOX Ở CHỖ NÚP
+        local saveVel = HRP.AssemblyLinearVelocity
+        HRP.CFrame = SafeSpotCFrame
+        HRP.AssemblyLinearVelocity = Vector3.zero 
+    end
+end)
 
--- Reset
+-- --- INPUT ---
+MainBtn.Activated:Connect(function() if not dragging then if DesyncEnabled then DisableGod() else EnableGod() end end end)
+
 LocalPlayer.CharacterAdded:Connect(function(newChar)
     Character = newChar
     HRP = Character:WaitForChild("HumanoidRootPart")
     Humanoid = Character:WaitForChild("Humanoid")
-    if DesyncEnabled then ToggleGod() end
+    if DesyncEnabled then DisableGod() end
 end)
